@@ -86,7 +86,7 @@ class ForecastTilePyramid:
     ) -> tuple[bytes, bool, float]:
         """Return PNG bytes, whether they came from disk cache, and data resolution."""
         resolution = resolution_for_zoom(zoom)
-        key = cache_key(active, self.engine.provider.name, day, minute_offset)
+        key = cache_key(active, self.engine.provider_key(day), day, minute_offset)
         namespace = self._prepare_namespace(key)
         path = namespace / str(zoom) / str(tile_x) / f"{tile_y}.png"
         if path.exists():

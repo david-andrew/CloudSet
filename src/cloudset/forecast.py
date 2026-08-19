@@ -46,6 +46,7 @@ class WeatherField:
     precip: np.ndarray
     texture: np.ndarray
     western_clearance: np.ndarray
+    visibility_clarity: np.ndarray
 
 
 class WeatherProvider(Protocol):
@@ -81,7 +82,7 @@ class DemoWeatherProvider:
         aerosol = np.clip(0.09 + 0.055 * np.sin((latitudes - 30) * 0.35 - n * 0.13) + 0.025 * cellular, 0.01, 0.35)
         precip = np.clip((low - 0.64) * 1.7 + np.maximum(0, mid - 0.82), 0, 1)
         texture = np.clip(0.48 + 0.45 * np.abs(cellular), 0, 1)
-        return WeatherField(low, mid, high, aerosol, precip, texture, 1 - west_low)
+        return WeatherField(low, mid, high, aerosol, precip, texture, 1 - west_low, 1 - precip * 0.7)
 
 
 def _expanded_points(active: list[str]) -> tuple[np.ndarray, np.ndarray]:
@@ -116,6 +117,16 @@ class ForecastEngine:
     def __init__(self, provider: WeatherProvider | None = None):
         self.provider = provider or DemoWeatherProvider()
 
+    def provider_metadata(self, day: date) -> dict:
+        metadata = getattr(self.provider, "metadata", None)
+        if metadata:
+            return metadata(day)
+        return {"mode": "demo", "model_run": "DEMO · deterministic atmospheric field", "confidence": 42}
+
+    def provider_key(self, day: date) -> str:
+        key = getattr(self.provider, "cache_key", None)
+        return key(day) if key else self.provider.name
+
     def score_field(
         self, lat: np.ndarray, lon: np.ndarray, day: date, minute_offset: int = 0
     ) -> tuple[np.ndarray, WeatherField]:
@@ -125,7 +136,7 @@ class ForecastEngine:
         reflector_fit = np.exp(-((reflector - 0.62) / 0.32) ** 2)
         low_clear = 1 - field.low_cloud**1.35
         aerosol_fit = np.exp(-((field.aerosol - 0.12) / 0.10) ** 2)
-        dry = 1 - field.precip
+        dry = (1 - field.precip) * (0.72 + 0.28 * field.visibility_clarity)
         ingredients = (
             0.34 * reflector_fit * np.clip(reflector / 0.45, 0, 1)
             + 0.22 * field.western_clearance
@@ -144,6 +155,7 @@ class ForecastEngine:
         lat, lon = _expanded_points(active)
         scores, field = self.score_field(lat, lon, day, minute_offset)
 
+        provider_meta = self.provider_metadata(day)
         features: list[dict] = []
         sunsets: list[datetime] = []
         for i in range(len(lat)):
@@ -166,7 +178,7 @@ class ForecastEngine:
                         "valid_utc": moment.isoformat(),
                         "sun_azimuth": round(azimuth, 1),
                         "sun_elevation": round(elevation, 2),
-                        "confidence": 42,
+                        "confidence": provider_meta["confidence"],
                         "low_cloud": round(float(field.low_cloud[i] * 100)),
                         "mid_cloud": round(float(field.mid_cloud[i] * 100)),
                         "high_cloud": round(float(field.high_cloud[i] * 100)),
@@ -184,8 +196,8 @@ class ForecastEngine:
                 "minute_offset": minute_offset,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "provider": self.provider.name,
-                "mode": "demo",
-                "model_run": "DEMO · deterministic atmospheric field",
+                "mode": provider_meta["mode"],
+                "model_run": provider_meta["model_run"],
                 "cell_count": len(features),
                 "resolution_degrees": FORECAST_RESOLUTION,
                 "valid_window_utc": [min(sunsets).isoformat(), max(sunsets).isoformat()] if sunsets else [],
@@ -207,6 +219,7 @@ class ForecastEngine:
         lat = np.asarray([latitude], dtype=np.float32)
         lon = np.asarray([longitude], dtype=np.float32)
         scores, field = self.score_field(lat, lon, day, minute_offset)
+        provider_meta = self.provider_metadata(day)
         sunset = sunset_utc(day, latitude, longitude)
         if sunset is None:
             return None
@@ -223,7 +236,7 @@ class ForecastEngine:
                 "valid_utc": moment.isoformat(),
                 "sun_azimuth": round(azimuth, 1),
                 "sun_elevation": round(elevation, 2),
-                "confidence": 42,
+                "confidence": provider_meta["confidence"],
                 "low_cloud": round(float(field.low_cloud[0] * 100)),
                 "mid_cloud": round(float(field.mid_cloud[0] * 100)),
                 "high_cloud": round(float(field.high_cloud[0] * 100)),

@@ -90,10 +90,39 @@ document.querySelector('#run-now').addEventListener('click', async (event) => {
   try { const result = await api('/api/admin/run', { method: 'POST' }); document.querySelector('#runtime-stat').textContent = `${result.duration_ms} ms`; document.querySelector('#run-detail').textContent = `Run #${result.run_id} completed ${result.cells} forecast cells in ${result.duration_ms} ms.`; toast('Forecast field refreshed'); }
   catch (error) { toast(error.message); } finally { button.disabled = false; button.textContent = 'Run now'; }
 });
-document.querySelector('#test-email').addEventListener('click', async (event) => {
+document.querySelector('#ingest-now').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true; button.textContent = 'Fetching NOAA data…';
+  try {
+    const result = await api('/api/admin/ingest', { method: 'POST' });
+    const latest = result.runs[0];
+    document.querySelector('#hrrr-detail').textContent = `Loaded ${result.runs.length} sunset snapshots. Latest: ${latest.cycle_utc.slice(0, 13).replace('T', ' ')}Z · F${String(latest.forecast_hour).padStart(2, '0')}.`;
+    document.querySelector('#mode-stat').textContent = 'LIVE';
+    document.querySelector('#provider-stat').textContent = 'NOAA HRRR';
+    toast('Live HRRR snapshots refreshed');
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = 'Fetch HRRR now'; }
+});
+document.querySelector('#notification-pass').addEventListener('click', async (event) => {
   const button = event.currentTarget; button.disabled = true;
   try { const result = await api('/api/admin/notifications/test', { method: 'POST' }); toast(`${result.sent} sent · ${result.skipped} skipped${result.errors.length ? ` · ${result.errors.length} errors` : ''}`); }
   catch (error) { toast(error.message); } finally { button.disabled = false; }
+});
+document.querySelector('#send-test-email').addEventListener('click', async (event) => {
+  const button = event.currentTarget; const email = document.querySelector('#test-email-address').value.trim();
+  if (!email) return toast('Enter the test recipient email address');
+  button.disabled = true; button.textContent = 'Sending…';
+  try {
+    const result = await api('/api/admin/email/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    const preview = document.querySelector('#email-preview');
+    preview.hidden = false;
+    const maps = result.preview.maps_embedded;
+    const mapStatus = maps
+      ? `Maps: ${maps.detail ? 'close-up ✓' : 'close-up unavailable'} · ${maps.regional ? 'regional ✓' : 'regional unavailable'}\n`
+      : (result.preview.map_embedded ? 'Map: embedded forecast map included\n' : 'Map: unavailable for this message\n');
+    preview.textContent = `To: ${result.preview.to}\nSubject: ${result.preview.subject}\n${mapStatus}\n${result.preview.body}`;
+    toast(result.delivery === 'sent' ? 'Test email sent' : 'SMTP is not configured · preview generated');
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = 'Send test email'; }
 });
 document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => document.querySelector(`#${button.dataset.scroll}`).scrollIntoView({ behavior: 'smooth' })));
 window.addEventListener('beforeunload', (event) => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
@@ -106,6 +135,9 @@ async function init() {
     document.querySelector('#subscriber-stat').textContent = status.subscribers;
     document.querySelector('#mode-stat').textContent = status.mode.toUpperCase();
     document.querySelector('#provider-stat').textContent = status.provider;
+    document.querySelector('#hrrr-detail').textContent = status.mode === 'live'
+      ? `${status.model_run}. Compact snapshot is ready for the active forecast footprint.`
+      : 'No current HRRR snapshot is loaded. The public map is using its labeled demo fallback.';
     document.querySelector('#smtp-detail').textContent = status.smtp_configured ? 'SMTP is configured. The scheduler checks eligible subscribers every 15 minutes.' : 'SMTP is not configured. Notification messages are logged safely instead of sent.';
     if (status.last_run) { document.querySelector('#runtime-stat').textContent = `${Math.round(status.last_run.duration_ms)} ms`; document.querySelector('#run-detail').textContent = `Last run #${status.last_run.id} completed ${status.last_run.cells} cells.`; }
     else document.querySelector('#runtime-stat').textContent = 'Not run';

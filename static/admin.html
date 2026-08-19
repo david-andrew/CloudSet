@@ -44,12 +44,21 @@
         <article><span>DATA MODE</span><strong id="mode-stat">—</strong><small id="provider-stat">Provider</small></article>
       </section>
       <section class="pipeline-card">
+        <div><span class="eyebrow">WEATHER DATA</span><h2>NOAA HRRR</h2><p id="hrrr-detail">Checking the latest model snapshot…</p></div>
+        <button class="primary-button" id="ingest-now">Fetch HRRR now</button>
+      </section>
+      <section class="pipeline-card">
         <div><span class="eyebrow">PIPELINE</span><h2>Forecast engine</h2><p id="run-detail">Generate and cache the current field after changing the footprint.</p></div>
         <button class="primary-button" id="run-now">Run now</button>
       </section>
-      <section class="pipeline-card" id="delivery">
+      <section class="pipeline-card delivery-card" id="delivery">
         <div><span class="eyebrow">DELIVERY</span><h2>Email notifications</h2><p id="smtp-detail">Checking SMTP configuration…</p></div>
-        <button class="ghost-button dark" id="test-email">Run notification pass</button>
+        <div class="delivery-controls">
+          <input id="test-email-address" type="email" placeholder="you@example.com" aria-label="Test email recipient">
+          <button class="primary-button" id="send-test-email">Send test email</button>
+          <button class="ghost-button dark" id="notification-pass">Run due-alert pass</button>
+        </div>
+        <pre id="email-preview" hidden></pre>
       </section>
     </section>
   </main>

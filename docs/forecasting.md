@@ -12,13 +12,13 @@ The useful ingredients are more specific than generic cloud cover:
 4. Low cloud, fog, heavy precipitation, and terrain near the western horizon can block the view.
 5. Moderate aerosol loading can deepen reds; extreme smoke/dust can instead extinguish the light. This is a secondary signal and should be quality-controlled.
 
-The current engine implements that scoring structure with live solar geometry and deterministic demo weather fields. `meta.mode` and the UI label the result as demo. No demo score is represented as an operational weather forecast.
+The current engine implements that scoring structure with live solar geometry and narrowly cropped NOAA HRRR fields. It downloads one representative sunset-valid lead for tonight and tomorrow, then resamples the requested low/mid/high cloud, visibility, and precipitation variables to a compact 0.0625° runtime snapshot. `meta.mode` and the UI switch explicitly to demo only when a live snapshot is absent.
 
 ## Data priority
 
 ### Phase 1 — highest value per unit effort
 
-- **[HRRR (0–48 hours)](https://registry.opendata.aws/noaa-hrrr-pds/):** subset low/mid/high cloud cover, relative humidity, visibility, precipitation, and optionally cloud base/top fields over the active region plus its western buffer. HRRR is hourly, 3 km, and assimilates radar. Read only the required chunks/GRIB byte ranges; never download the entire model cycle to the Pi.
+- **[HRRR (0–48 hours)](https://registry.opendata.aws/noaa-hrrr-pds/) — implemented baseline:** subset low/mid/high cloud cover, visibility, and precipitation over the active region plus its western buffer using NOAA's GRIB filter. HRRR is hourly, 3 km, and assimilates radar. The ingest retrieves only a sunset-valid lead rather than an entire model cycle.
 - **Solar geometry:** compute sunset, solar elevation/azimuth, and the upstream illumination wedge locally. This is already implemented without a network dependency.
 - **[GOES-East ABI](https://www.nesdis.noaa.gov/our-satellites/currently-flying/goes-east-west/goes-r-series-data-products) (nowcast correction):** use current imagery/cloud products to correct model timing and cloud-edge position during roughly the final 0–3 hours. Start with Band 13/GeoColor motion and the clear-sky/cloud mask; add cloud height/phase/[optical depth](https://goes-r.noaa.gov/products/baseline-cloud-opt-depth.html) after the basic correction is stable.
 

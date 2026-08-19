@@ -4,12 +4,12 @@ Cloudset is a Pi-friendly app for finding the East Coast skies most likely to tu
 
 This repository is a working vertical slice:
 
-- public GOES/satellite + adaptive forecast-tile map, day/time scrubber, click-to-relocate, and email signup;
-- local control room with a paintable forecast footprint, upstream-data buffer, run controls, and delivery status;
+- public GOES/satellite + adaptive forecast-tile map, day/time scrubber, click-to-relocate, and email signup with selectable reminder times;
+- local control room with a paintable forecast footprint, upstream-data buffer, run controls, delivery status, and test-email preview/send;
 - vectorized scoring, solar geometry, SQLite persistence, SMTP delivery, and a 15-minute notification scheduler;
-- deterministic demo atmosphere so every flow is testable before large weather ingestion is connected.
+- live NOAA HRRR sunset snapshots with deterministic demo fallback when NOAA data is unavailable.
 
-The atmospheric layer is currently **demo data**. The UI and API say so. Solar position, sunset time, persistence, notification decisions, NASA GOES imagery, and all product interactions are real.
+With `CLOUDSET_FORECAST_MODE=auto`, the service downloads narrowly cropped NOAA HRRR low/mid/high cloud, visibility, and precipitation fields for tonight and tomorrow. It normalizes each valid time to a compact 0.0625° NumPy snapshot and refreshes hourly. If the upstream cycle is unavailable, the UI and API explicitly switch to the deterministic demo fallback rather than presenting stale/demo data as live.
 
 ## Run locally
 
@@ -20,7 +20,11 @@ uv run cloudset
 
 Open <http://127.0.0.1:8080> and <http://127.0.0.1:8080/admin>. The API schema is at <http://127.0.0.1:8080/docs>.
 
-Configuration is via the variables in [`.env.example`](.env.example). Without SMTP, eligible notifications are logged rather than sent. Set `CLOUDSET_ADMIN_TOKEN` before making the admin endpoint accessible to anything beyond a trusted LAN.
+Configuration is via the variables in [`.env.example`](.env.example). Without SMTP, eligible notifications are logged rather than sent; the admin test-email control still renders the exact message preview. Set `CLOUDSET_ADMIN_TOKEN` before making the admin endpoint accessible to anything beyond a trusted LAN.
+
+Notification emails include the saved location and coordinates, a plain-text fallback, embedded close-up and regional OpenStreetMap images composited with the Cloudset forecast overlay, high-contrast labels, and location marker, plus a deep link back to the interactive outlook. Set `CLOUDSET_PUBLIC_URL` to the LAN address or public domain recipients should open. Basemap tiles are cached under ignored runtime data so repeated alerts remain lightweight.
+
+Fetch live snapshots immediately with `uv run cloudset-ingest`, or use **Fetch HRRR now** in the admin control room. The background scheduler performs the same refresh hourly in `auto`/`live` mode.
 
 ## Verify
 
@@ -49,7 +53,7 @@ For boot without an interactive login, enable linger for that Pi user (`loginctl
 
 ## Next implementation milestone
 
-Connect the provider interface in [`forecast.py`](src/cloudset/forecast.py) to cropped HRRR cloud/visibility/precipitation fields, then add a GOES cloud-motion correction. The reasoning, field list, ordering, and resource constraints are in [the forecasting design](docs/forecasting.md). The `WeatherProvider` boundary lets that work land without changing either UI or notification logic.
+Add a GOES cloud-motion correction to the live HRRR baseline, followed by aerosol/smoke input and observed-outcome calibration. The reasoning, ordering, and resource constraints are in [the forecasting design](docs/forecasting.md). The `WeatherProvider` boundary keeps those additions independent from either UI and notification logic.
 
 ## Data attribution
 

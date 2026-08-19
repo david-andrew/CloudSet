@@ -15,8 +15,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .config import Settings, get_settings
+from .email_map import render_email_map
 from .forecast import REGION_BOUNDS, ForecastEngine, default_region
-from .mailer import send_forecast
+from .hrrr import HrrrIngestor, HrrrWeatherProvider
+from .mailer import plain_text_content, send_forecast
+from .solar import sunset_utc
 from .store import Store
 from .tiles import ForecastTilePyramid, cache_key
 
@@ -24,8 +27,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger(__name__)
 settings = get_settings()
 store = Store(settings.db_path)
-engine = ForecastEngine()
+live_provider = HrrrWeatherProvider(settings.root / "data" / "hrrr" / "fields")
+engine = ForecastEngine(live_provider if settings.forecast_mode in {"auto", "live"} else None)
 tile_pyramid = ForecastTilePyramid(settings.root / "data" / "tile_cache", engine)
+hrrr_ingestor = HrrrIngestor(settings.root / "data" / "hrrr")
 FORECAST_TIMEZONE = ZoneInfo("America/New_York")
 
 
@@ -38,7 +43,7 @@ _cache: dict[tuple, dict] = {}
 
 def forecast_for(day: date, minute_offset: int = 0) -> dict:
     active = _active_region()
-    key = (day.isoformat(), minute_offset, tuple(active), engine.provider.name)
+    key = (day.isoformat(), minute_offset, tuple(active), engine.provider_key(day))
     if key not in _cache:
         _cache[key] = engine.calculate(active, day, minute_offset)
         if len(_cache) > 30:
@@ -48,17 +53,84 @@ def forecast_for(day: date, minute_offset: int = 0) -> dict:
 
 def forecast_meta(day: date, minute_offset: int = 0) -> dict:
     active = _active_region()
+    provider_meta = engine.provider_metadata(day)
     return {
         "day": day.isoformat(),
         "minute_offset": minute_offset,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "provider": engine.provider.name,
-        "mode": "demo",
-        "model_run": "DEMO · deterministic atmospheric field",
+        "provider": provider_meta.get("source", "demo-atmosphere"),
+        "mode": provider_meta["mode"],
+        "model_run": provider_meta["model_run"],
+        "data_source": provider_meta,
         "resolution_degrees": 0,
-        "revision": cache_key(active, engine.provider.name, day, minute_offset),
+        "revision": cache_key(active, engine.provider_key(day), day, minute_offset),
         "tile_resolutions_degrees": {"z3-5": 0.5, "z6": 0.25, "z7": 0.125, "z8+": 0.0625},
     }
+
+
+def email_map_for(
+    forecast_day: date,
+    latitude: float,
+    longitude: float,
+    *,
+    zoom: int = 10,
+    tile_scale: float = 1.25,
+    forecast_blur: float = 5,
+) -> bytes | None:
+    try:
+        return render_email_map(
+            tile_pyramid,
+            _active_region(),
+            forecast_day,
+            latitude,
+            longitude,
+            settings.root / "data" / "email_map_cache",
+            zoom=zoom,
+            tile_scale=tile_scale,
+            forecast_blur=forecast_blur,
+        )
+    except Exception:
+        # A basemap outage should never suppress a useful forecast notification.
+        log.exception("Email map rendering failed; sending the alert without a map")
+        return None
+
+
+EVENT_LABELS = {
+    "day_before": "Early outlook · the evening before",
+    "morning": "Morning sunset outlook",
+    "final_90": "Final call · about 90 minutes before sunset",
+    "custom": "Your custom sunset reminder",
+    "manual": "Manual notification check",
+}
+
+
+def _due_events(subscriber: dict, now: datetime, force: bool = False) -> list[tuple[str, date, str]]:
+    local_now = now.astimezone(FORECAST_TIMEZONE)
+    today = local_now.date()
+    if force:
+        return [("manual", today, EVENT_LABELS["manual"])]
+    selected = set(subscriber.get("notification_times") or ["morning", "final_90"])
+    events: list[tuple[str, date, str]] = []
+    if "morning" in selected and 8 <= local_now.hour < 12:
+        events.append(("morning", today, EVENT_LABELS["morning"]))
+    if "day_before" in selected and 18 <= local_now.hour <= 23:
+        events.append(("day_before", today + timedelta(days=1), EVENT_LABELS["day_before"]))
+    latitude = float(subscriber["latitude"])
+    longitude = float(subscriber["longitude"])
+    if "final_90" in selected:
+        sunset = sunset_utc(today, latitude, longitude)
+        if sunset and sunset - timedelta(minutes=90) <= now < sunset:
+            events.append(("final_90", today, EVENT_LABELS["final_90"]))
+    if "custom" in selected and subscriber.get("custom_minutes"):
+        minutes = int(subscriber["custom_minutes"])
+        for offset in range(2):
+            forecast_day = today + timedelta(days=offset)
+            sunset = sunset_utc(forecast_day, latitude, longitude)
+            if sunset and sunset - timedelta(minutes=minutes) <= now < sunset:
+                label = f"Custom reminder · {minutes / 60:g} hours before sunset"
+                events.append((f"custom_{minutes}", forecast_day, label))
+                break
+    return events
 
 
 def dispatch_notifications(force: bool = False) -> dict:
@@ -66,30 +138,55 @@ def dispatch_notifications(force: bool = False) -> dict:
     sent = skipped = 0
     errors: list[str] = []
     for subscriber in store.subscriptions():
-        local_now = now + timedelta(hours=float(subscriber["longitude"]) / 15)
-        if not force and not 12 <= local_now.hour < 17:
+        events = _due_events(subscriber, now, force)
+        if not events:
             skipped += 1
             continue
-        day = local_now.date()
-        if store.notification_exists(int(subscriber["id"]), day.isoformat()):
-            skipped += 1
-            continue
-        feature = engine.point(
-            _active_region(),
-            float(subscriber["latitude"]),
-            float(subscriber["longitude"]),
-            day,
-        )
-        if not feature or feature["properties"]["score"] < subscriber["threshold"]:
-            skipped += 1
-            continue
-        try:
-            result = send_forecast(settings, subscriber, feature)
-            store.record_notification(int(subscriber["id"]), day.isoformat(), feature["properties"]["score"], result)
-            sent += 1
-        except Exception as exc:  # SMTP failures must not stop other recipients.
-            log.exception("Notification failed")
-            errors.append(f"subscription {subscriber['id']}: {exc}")
+        for event_key, forecast_day, event_label in events:
+            if store.notification_exists(int(subscriber["id"]), forecast_day.isoformat(), event_key):
+                skipped += 1
+                continue
+            if engine.provider_metadata(forecast_day)["mode"] != "live" and not force:
+                skipped += 1
+                continue
+            feature = engine.point(
+                _active_region(),
+                float(subscriber["latitude"]),
+                float(subscriber["longitude"]),
+                forecast_day,
+            )
+            if not feature or feature["properties"]["score"] < subscriber["threshold"]:
+                skipped += 1
+                continue
+            try:
+                detail_map_png = email_map_for(
+                    forecast_day,
+                    float(subscriber["latitude"]),
+                    float(subscriber["longitude"]),
+                )
+                regional_map_png = email_map_for(
+                    forecast_day,
+                    float(subscriber["latitude"]),
+                    float(subscriber["longitude"]),
+                    zoom=8,
+                    tile_scale=1,
+                    forecast_blur=3,
+                )
+                result, _ = send_forecast(
+                    settings,
+                    subscriber,
+                    feature,
+                    event_label,
+                    detail_map_png,
+                    regional_map_png,
+                )
+                store.record_notification(
+                    int(subscriber["id"]), forecast_day.isoformat(), event_key, feature["properties"]["score"], result
+                )
+                sent += 1
+            except Exception as exc:  # SMTP failures must not stop other recipients.
+                log.exception("Notification failed")
+                errors.append(f"subscription {subscriber['id']} ({event_key}): {exc}")
     return {"sent": sent, "skipped": skipped, "errors": errors}
 
 
@@ -102,15 +199,35 @@ async def scheduler() -> None:
         await asyncio.sleep(15 * 60)
 
 
+async def hrrr_scheduler() -> None:
+    # Let startup and short-lived test processes settle; existing snapshots are
+    # immediately available, and an admin can always trigger a refresh now.
+    await asyncio.sleep(30)
+    while True:
+        try:
+            today = datetime.now(FORECAST_TIMEZONE).date()
+            results = await asyncio.to_thread(hrrr_ingestor.refresh, _active_region(), today)
+            live_provider.invalidate()
+            _cache.clear()
+            log.info("HRRR refresh complete: %s", results)
+        except Exception:
+            log.exception("HRRR refresh failed; demo fallback remains active")
+        await asyncio.sleep(60 * 60)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = asyncio.create_task(scheduler())
+    tasks = [asyncio.create_task(scheduler())]
+    if settings.forecast_mode in {"auto", "live"}:
+        tasks.append(asyncio.create_task(hrrr_scheduler()))
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Cloudset", version="0.1.0", lifespan=lifespan)
@@ -153,6 +270,31 @@ class SubscriptionCreate(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     label: str = Field(default="", max_length=100)
     threshold: int = Field(default=70, ge=40, le=95)
+    notification_times: list[str] = Field(default_factory=lambda: ["morning", "final_90"], min_length=1, max_length=4)
+    custom_minutes: int | None = Field(default=None, ge=30, le=2160)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str) -> str:
+        email = email.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+            raise ValueError("Enter a valid email address")
+        return email
+
+    @field_validator("notification_times")
+    @classmethod
+    def validate_notification_times(cls, values: list[str]) -> list[str]:
+        allowed = {"day_before", "morning", "final_90", "custom"}
+        unique = list(dict.fromkeys(values))
+        if not unique or any(value not in allowed for value in unique):
+            raise ValueError("Choose at least one valid notification time")
+        return unique
+
+
+class EmailTest(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    latitude: float = Field(default=40.7128, ge=-90, le=90)
+    longitude: float = Field(default=-74.006, ge=-180, le=180)
 
     @field_validator("email")
     @classmethod
@@ -175,13 +317,14 @@ def admin_ui() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "mode": settings.forecast_mode, "version": app.version}
+    today = datetime.now(FORECAST_TIMEZONE).date()
+    return {"status": "ok", "mode": engine.provider_metadata(today)["mode"], "configured_mode": settings.forecast_mode, "version": app.version}
 
 
 @app.get("/api/config")
 def config() -> dict:
     return {
-        "mode": settings.forecast_mode,
+        "mode": engine.provider_metadata(datetime.now(FORECAST_TIMEZONE).date())["mode"],
         "admin_auth": bool(settings.admin_token),
         "smtp_configured": bool(settings.smtp_host),
         "region_bounds": REGION_BOUNDS,
@@ -265,7 +408,17 @@ def forecast_tile(
 def subscribe(payload: SubscriptionCreate, request: Request) -> dict:
     # SQLite uniqueness makes retries idempotent. A reverse proxy should add a
     # per-IP rate limit before exposing this endpoint broadly.
-    subscriber_id = store.subscribe(payload.email, payload.latitude, payload.longitude, payload.label, payload.threshold)
+    if "custom" in payload.notification_times and payload.custom_minutes is None:
+        raise HTTPException(status_code=422, detail="Choose how many hours before sunset for the custom reminder")
+    subscriber_id = store.subscribe(
+        payload.email,
+        payload.latitude,
+        payload.longitude,
+        payload.label,
+        payload.threshold,
+        payload.notification_times,
+        payload.custom_minutes,
+    )
     log.info("Subscription %s created/updated from %s", subscriber_id, request.client.host if request.client else "unknown")
     return {"ok": True, "id": subscriber_id, "message": "You're on the sunset watchlist."}
 
@@ -282,6 +435,17 @@ def update_region(payload: RegionUpdate) -> dict:
     return {"ok": True, "active_count": len(payload.active_cells), "forecast_cells": len(payload.active_cells) * 4}
 
 
+@app.post("/api/admin/ingest", dependencies=[Depends(require_admin)])
+def ingest_hrrr() -> dict:
+    if settings.forecast_mode not in {"auto", "live"}:
+        raise HTTPException(status_code=409, detail="Set CLOUDSET_FORECAST_MODE=auto or live to enable HRRR")
+    today = datetime.now(FORECAST_TIMEZONE).date()
+    results = hrrr_ingestor.refresh(_active_region(), today)
+    live_provider.invalidate()
+    _cache.clear()
+    return {"ok": True, "runs": results}
+
+
 @app.post("/api/admin/run", dependencies=[Depends(require_admin)])
 def run_forecast() -> dict:
     _cache.clear()
@@ -290,20 +454,72 @@ def run_forecast() -> dict:
     result = forecast_for(datetime.now(FORECAST_TIMEZONE).date())
     duration = (time.perf_counter() - then) * 1000
     finished = datetime.now(timezone.utc)
-    run_id = store.add_run(started.isoformat(), finished.isoformat(), settings.forecast_mode, len(result["features"]), duration, "Forecast field generated")
+    actual_mode = engine.provider_metadata(datetime.now(FORECAST_TIMEZONE).date())["mode"]
+    run_id = store.add_run(started.isoformat(), finished.isoformat(), actual_mode, len(result["features"]), duration, "Forecast field generated")
     return {"ok": True, "run_id": run_id, "cells": len(result["features"]), "duration_ms": round(duration, 1)}
 
 
 @app.post("/api/admin/notifications/test", dependencies=[Depends(require_admin)])
 def test_notifications() -> dict:
-    return dispatch_notifications(force=True)
+    return dispatch_notifications(force=False)
+
+
+@app.post("/api/admin/email/test", dependencies=[Depends(require_admin)])
+def send_test_email(payload: EmailTest) -> dict:
+    today = datetime.now(FORECAST_TIMEZONE).date()
+    feature = engine.point(_active_region(), payload.latitude, payload.longitude, today)
+    if not feature:
+        raise HTTPException(status_code=404, detail="Test location is outside the active forecast area")
+    subscriber = {
+        "email": payload.email,
+        "label": "New York City" if abs(payload.latitude - 40.7128) < 0.1 and abs(payload.longitude + 74.006) < 0.1 else "your test location",
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+    }
+    detail_map_png = email_map_for(today, payload.latitude, payload.longitude)
+    regional_map_png = email_map_for(
+        today,
+        payload.latitude,
+        payload.longitude,
+        zoom=8,
+        tile_scale=1,
+        forecast_blur=3,
+    )
+    delivery, message = send_forecast(
+        settings,
+        subscriber,
+        feature,
+        "This is a Cloudset test email · no alert was triggered",
+        detail_map_png,
+        regional_map_png,
+    )
+    return {
+        "ok": True,
+        "delivery": delivery,
+        "smtp_configured": bool(settings.smtp_host),
+        "preview": {
+            "to": payload.email,
+            "subject": str(message["Subject"]),
+            "body": plain_text_content(message),
+            "map_embedded": detail_map_png is not None or regional_map_png is not None,
+            "maps_embedded": {
+                "detail": detail_map_png is not None,
+                "regional": regional_map_png is not None,
+            },
+        },
+    }
 
 
 @app.get("/api/admin/status", dependencies=[Depends(require_admin)])
 def admin_status() -> dict:
+    today = datetime.now(FORECAST_TIMEZONE).date()
+    provider_meta = engine.provider_metadata(today)
     return {
-        "mode": settings.forecast_mode,
-        "provider": engine.provider.name,
+        "mode": provider_meta["mode"],
+        "configured_mode": settings.forecast_mode,
+        "model_run": provider_meta["model_run"],
+        "data_source": provider_meta,
+        "provider": provider_meta.get("source", "demo-atmosphere"),
         "active_cells": len(_active_region()),
         "forecast_cells": len(_active_region()) * 4,
         "subscribers": len(store.subscriptions()),

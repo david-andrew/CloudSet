@@ -100,27 +100,27 @@
 
   <dialog id="notify-dialog">
     <form method="dialog" class="dialog-card" id="notify-form">
-      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <button class="dialog-close" id="notify-close" type="button" aria-label="Close">×</button>
       <span class="dialog-kicker">SUNSET WATCH</span>
       <h2>We'll watch the horizon.</h2>
-      <p>Get one email on promising days—early enough to find a good west-facing view.</p>
+      <p>Choose when to hear about promising sunsets—early enough to find a good west-facing view.</p>
       <label>Email address<input id="email" name="email" type="email" placeholder="you@example.com" required></label>
-      <fieldset class="notify-location-choice">
-        <legend>Alert location</legend>
-        <label class="location-choice active">
-          <input type="radio" name="notify-location" value="current" checked>
-          <span><strong>Use currently selected location</strong><small id="notify-current-location">New York City · 40.713° N, 74.006° W</small></span>
-        </label>
-        <label class="location-choice">
-          <input type="radio" name="notify-location" value="custom">
-          <span><strong>Use different coordinates</strong><small>Watch another home, viewpoint, or destination</small></span>
-        </label>
-        <div class="custom-location-fields" id="custom-location-fields" hidden>
-          <label>Latitude<input id="notify-latitude" type="number" min="-90" max="90" step="any" placeholder="40.7128"></label>
-          <label>Longitude<input id="notify-longitude" type="number" min="-180" max="180" step="any" placeholder="-74.0060"></label>
-        </div>
+      <label class="use-current-location">
+        <input id="use-current-location" type="checkbox" checked>
+        <span><strong>Use currently selected location</strong><small id="notify-current-location">New York City · 40.713° N, 74.006° W</small></span>
+      </label>
+      <label>Notification location
+        <input id="notification-location" type="text" disabled value="New York City — 40.7128, -74.0060" placeholder="40.7128, -74.0060" required>
+        <small class="location-input-help">Uncheck the option above to enter latitude, longitude.</small>
+      </label>
+      <fieldset class="notification-timing">
+        <legend>When should we notify you?</legend>
+        <label><input type="checkbox" name="notification-time" value="day_before"><span><strong>Evening before</strong><small>An early outlook while tomorrow is still easy to plan.</small></span></label>
+        <label><input type="checkbox" name="notification-time" value="morning" checked><span><strong>Morning of</strong><small>A refreshed forecast between 8 and noon.</small></span></label>
+        <label><input type="checkbox" name="notification-time" value="final_90" checked><span><strong>90 minutes before</strong><small>A final call close to sunset.</small></span></label>
+        <label><input id="custom-time-toggle" type="checkbox" name="notification-time" value="custom"><span><strong>Custom</strong><small>Choose your own lead time.</small></span></label>
+        <div class="custom-time" id="custom-time" hidden><input id="custom-hours" type="number" min="0.5" max="36" step="0.5" value="6"><span>hours before sunset</span></div>
       </fieldset>
-      <label>Location name<input id="place-label" name="label" type="text" placeholder="Home, Brooklyn, the lake…"></label>
       <label class="threshold-label"><span>Alert me at <strong id="threshold-output">70</strong> or higher</span><input id="threshold" type="range" min="40" max="95" step="5" value="70"></label>
       <button class="primary-button full" id="subscribe-button" value="default">Start watching the sky</button>
       <small class="form-note" id="form-note">No spam. One location per signup. Unsubscribe support is the next production hardening item.</small>
@@ -133,7 +133,7 @@
       <span class="dialog-kicker">BEHIND THE GLOW</span>
       <h2>Not just “partly cloudy.”</h2>
       <p>Cloudset looks for a reflecting canvas of middle and high clouds, a clear path toward the setting sun, limited low-cloud obstruction, useful aerosols, and no rain curtain.</p>
-      <p class="demo-warning"><strong>Current build:</strong> the map exercises the complete scoring and subscription flow with deterministic demo weather. It is clearly marked until HRRR/GOES ingestion is enabled.</p>
+      <p class="demo-warning" id="weather-source-note"><strong>Weather source:</strong> checking the latest forecast snapshot…</p>
     </article>
   </dialog>
 

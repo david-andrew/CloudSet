@@ -125,18 +125,24 @@ dialog::backdrop { background: rgba(20,17,18,.66); backdrop-filter: blur(4px); }
 .dialog-card label { display: block; color: #514c47; font-size: 11px; font-weight: 600; margin: 17px 0; }
 .dialog-card input[type=email], .dialog-card input[type=text], .dialog-card input[type=number] { display: block; width: 100%; margin-top: 7px; border: 1px solid #d5d0c8; border-radius: 7px; background: white; padding: 12px; outline: none; }
 .dialog-card input:focus { border-color: #d56b43; box-shadow: 0 0 0 3px rgba(213,107,67,.12); }
-.notify-location-choice { border: 0; padding: 0; margin: 18px 0; }
-.notify-location-choice legend { color: #514c47; font-size: 11px; font-weight: 600; margin-bottom: 7px; }
-.dialog-card .location-choice { display: flex; align-items: center; gap: 10px; border: 1px solid #d8d2ca; border-radius: 7px; padding: 10px 11px; margin: 7px 0; background: white; cursor: pointer; transition: border-color .18s, background .18s; }
-.dialog-card .location-choice.active { border-color: #dd7952; background: #fff8f2; box-shadow: 0 0 0 2px rgba(221,121,82,.09); }
-.location-choice input { accent-color: var(--amber); flex: 0 0 auto; margin: 0; }
-.location-choice span { min-width: 0; }
-.location-choice strong, .location-choice small { display: block; }
-.location-choice strong { font-size: 11px; }
-.location-choice small { color: #8b837b; font-size: 9px; font-weight: 400; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.custom-location-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-.custom-location-fields[hidden] { display: none; }
-.dialog-card .custom-location-fields label { margin: 6px 0 0; }
+.dialog-card .use-current-location { display: flex; align-items: center; gap: 10px; margin: 18px 0 12px; cursor: pointer; }
+.use-current-location input { width: 16px; height: 16px; accent-color: var(--amber); flex: 0 0 auto; margin: 0; }
+.use-current-location span { min-width: 0; }
+.use-current-location strong, .use-current-location small { display: block; }
+.use-current-location strong { font-size: 11px; }
+.use-current-location small { color: #8b837b; font-size: 9px; font-weight: 400; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog-card input:disabled { color: #8b857e; background: #ebe8e2; border-color: #ddd8d0; cursor: not-allowed; box-shadow: none; }
+.dialog-card .location-input-help { display: block; color: #948d85; font-size: 9px; font-weight: 400; margin-top: 5px; }
+.notification-timing { border: 0; padding: 0; margin: 18px 0; }
+.notification-timing legend { color: #514c47; font-size: 11px; font-weight: 600; margin-bottom: 7px; }
+.dialog-card .notification-timing > label { display: flex; align-items: flex-start; gap: 9px; margin: 7px 0; cursor: pointer; }
+.notification-timing > label input { width: 15px; height: 15px; accent-color: var(--amber); flex: 0 0 auto; margin: 1px 0 0; }
+.notification-timing strong, .notification-timing small { display: block; }
+.notification-timing strong { font-size: 10px; }
+.notification-timing small { color: #928a82; font-size: 8px; font-weight: 400; margin-top: 1px; }
+.custom-time { margin: 8px 0 3px 24px; display: flex; align-items: center; gap: 8px; color: #756e67; font-size: 9px; }
+.custom-time[hidden] { display: none; }
+.dialog-card .custom-time input[type=number] { width: 76px; margin: 0; padding: 8px; }
 .threshold-label span { display: flex; justify-content: space-between; }
 .form-note { color: #978f87; display: block; text-align: center; line-height: 1.4; margin-top: 11px; }
 .demo-warning { padding: 12px; background: #f4e7db; border-radius: 7px; color: #704a38 !important; }
@@ -189,6 +195,11 @@ dialog::backdrop { background: rgba(20,17,18,.66); backdrop-filter: blur(4px); }
 .pipeline-card { margin-top: 15px; border: 1px solid #d9d4cc; background: #faf9f6; border-radius: 7px; padding: 18px; display: flex; align-items: center; justify-content: space-between; }
 .pipeline-card h2 { margin: 5px 0 3px; font: 600 15px "Manrope"; }
 .pipeline-card p { margin: 0; color: #8a837c; font-size: 9px; }
+.delivery-card { flex-wrap: wrap; gap: 15px; }
+.delivery-controls { display: flex; align-items: center; gap: 7px; }
+.delivery-controls input { width: 220px; border: 1px solid #d4cfc6; border-radius: 6px; background: white; padding: 10px 11px; font-size: 10px; outline: none; }
+.delivery-controls input:focus { border-color: #d56b43; box-shadow: 0 0 0 3px rgba(213,107,67,.12); }
+.delivery-card pre { flex: 0 0 100%; margin: 0; padding: 14px; border-radius: 6px; background: #242329; color: #d8d5cf; white-space: pre-wrap; font: 10px/1.55 ui-monospace, monospace; max-height: 230px; overflow: auto; }
 .toast { position: fixed; right: 23px; bottom: 23px; background: #222127; color: white; padding: 12px 16px; border-radius: 7px; font-size: 11px; opacity: 0; transform: translateY(10px); pointer-events: none; transition: .25s; z-index: 2000; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .admin-cell { transition: fill-opacity .12s; }

@@ -4,10 +4,13 @@ version = "0.1.0"
 description = "Pi-friendly fiery sunset forecasts for the East Coast"
 requires-python = ">=3.11"
 dependencies = [
+  "eccodes>=2.43,<3",
+  "eccodeslib>=2.46,<3; sys_platform == 'linux'",
   "fastapi>=0.116,<1",
   "numpy>=2.0,<3",
   "pillow>=11.3,<13",
   "python-dotenv>=1.2,<2",
+  "scipy>=1.16,<2",
   "uvicorn[standard]>=0.35,<1",
 ]
 
@@ -16,6 +19,7 @@ dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
 
 [project.scripts]
 cloudset = "cloudset.main:run"
+cloudset-ingest = "cloudset.hrrr:run"
 
 [build-system]
 requires = ["hatchling"]

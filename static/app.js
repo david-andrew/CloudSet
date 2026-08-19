@@ -1,14 +1,33 @@
 /* global L */
+const linkParams = new URLSearchParams(window.location.search);
+const linkedLatitude = Number(linkParams.get('lat'));
+const linkedLongitude = Number(linkParams.get('lon'));
+const hasLinkedLocation = Number.isFinite(linkedLatitude) && Number.isFinite(linkedLongitude)
+  && linkedLatitude >= -90 && linkedLatitude <= 90 && linkedLongitude >= -180 && linkedLongitude <= 180;
+
+function linkedDayOffset(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return 0;
+  const target = new Date(`${value}T12:00:00`);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  if (Number.isNaN(target.getTime())) return 0;
+  return Math.max(0, Math.min(3, Math.round((target - today) / 86400000)));
+}
+
 const state = {
-  location: { latitude: 40.7128, longitude: -74.0060, label: 'New York City' },
-  day: 0,
+  location: hasLinkedLocation
+    ? { latitude: linkedLatitude, longitude: linkedLongitude, label: linkParams.get('label')?.slice(0, 100) || placeName(linkedLatitude, linkedLongitude) }
+    : { latitude: 40.7128, longitude: -74.0060, label: 'New York City' },
+  day: linkedDayOffset(linkParams.get('date')),
   offset: 0,
   forecastLayer: null,
   marker: null,
   revision: '',
 };
 
-const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12, preferCanvas: true }).setView([39.2, -74.8], 6);
+const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 12, preferCanvas: true }).setView(
+  hasLinkedLocation ? [state.location.latitude, state.location.longitude] : [39.2, -74.8],
+  hasLinkedLocation ? 9 : 6,
+);
 L.control.zoom({ position: 'topright' }).addTo(map);
 const roadLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
@@ -93,6 +112,17 @@ function updatePanel(feature) {
 function updateNotifyLocationPreview() {
   const { latitude, longitude, label } = state.location;
   document.querySelector('#notify-current-location').textContent = `${label} · ${Math.abs(latitude).toFixed(3)}° ${latitude >= 0 ? 'N' : 'S'}, ${Math.abs(longitude).toFixed(3)}° ${longitude >= 0 ? 'E' : 'W'}`;
+  if (document.querySelector('#use-current-location').checked) {
+    document.querySelector('#notification-location').value = `${label} — ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+  }
+}
+
+function customCoordinates(value) {
+  const parts = value.split(',').map((part) => Number(part.trim()));
+  if (parts.length !== 2 || !parts.every(Number.isFinite)) return null;
+  const [latitude, longitude] = parts;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
 }
 
 function renderForecastTiles(revision) {
@@ -130,7 +160,11 @@ async function loadForecast() {
     state.revision = meta.revision;
     renderForecastTiles(meta.revision);
     await loadPoint();
-    document.querySelector('#data-status-text').textContent = meta.mode === 'demo' ? 'Demo weather · live solar geometry' : 'Forecast updated';
+    const live = meta.mode === 'live';
+    document.querySelector('#data-status-text').textContent = live ? `Live · ${meta.model_run}` : 'Demo fallback · live solar geometry';
+    document.querySelector('#weather-source-note').innerHTML = live
+      ? `<strong>Current weather data:</strong> ${meta.model_run}, spatially normalized to the 5–7 km forecast layer. GOES-East imagery remains live in the map.`
+      : '<strong>Demo fallback:</strong> a current HRRR snapshot is unavailable. Scores use deterministic demo weather and remain clearly labeled.';
     document.querySelector('#selected-date').textContent = state.day === 0 ? 'TODAY' : new Date(Date.now() + state.day * 86400000).toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
   } catch (error) {
     document.querySelector('#data-status-text').textContent = 'Forecast unavailable';
@@ -190,13 +224,24 @@ const notifyDialog = document.querySelector('#notify-dialog');
   updateNotifyLocationPreview();
   notifyDialog.showModal();
 }));
-document.querySelectorAll('input[name="notify-location"]').forEach((input) => input.addEventListener('change', () => {
-  const useCurrent = document.querySelector('input[name="notify-location"]:checked').value === 'current';
-  document.querySelector('#custom-location-fields').hidden = useCurrent;
-  document.querySelectorAll('.location-choice').forEach((choice) => choice.classList.toggle('active', choice.querySelector('input').checked));
-  document.querySelector('#notify-latitude').required = !useCurrent;
-  document.querySelector('#notify-longitude').required = !useCurrent;
-}));
+document.querySelector('#notify-close').addEventListener('click', () => notifyDialog.close());
+document.querySelector('#use-current-location').addEventListener('change', (event) => {
+  const field = document.querySelector('#notification-location');
+  field.disabled = event.target.checked;
+  if (event.target.checked) {
+    field.dataset.customValue = field.value;
+    updateNotifyLocationPreview();
+  } else {
+    field.value = field.dataset.customValue?.includes(',') ? field.dataset.customValue : '';
+    field.placeholder = '40.7128, -74.0060';
+    field.focus();
+  }
+});
+document.querySelector('#notification-location').addEventListener('input', (event) => { event.target.dataset.customValue = event.target.value; });
+document.querySelector('#custom-time-toggle').addEventListener('change', (event) => {
+  document.querySelector('#custom-time').hidden = !event.target.checked;
+  document.querySelector('#custom-hours').required = event.target.checked;
+});
 document.querySelector('#about-button').addEventListener('click', () => document.querySelector('#about-dialog').showModal());
 document.querySelector('#details-button').addEventListener('click', () => document.querySelector('#about-dialog').showModal());
 document.querySelector('#threshold').addEventListener('input', (event) => { document.querySelector('#threshold-output').textContent = event.target.value; });
@@ -205,16 +250,23 @@ document.querySelector('#notify-form').addEventListener('submit', async (event) 
   const button = document.querySelector('#subscribe-button'); const note = document.querySelector('#form-note');
   button.disabled = true; button.textContent = 'Saving your watch…';
   try {
-    const useCurrent = document.querySelector('input[name="notify-location"]:checked').value === 'current';
-    const latitude = useCurrent ? state.location.latitude : Number(document.querySelector('#notify-latitude').value);
-    const longitude = useCurrent ? state.location.longitude : Number(document.querySelector('#notify-longitude').value);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new Error('Enter valid coordinates for the alert location');
+    const useCurrent = document.querySelector('#use-current-location').checked;
+    const custom = useCurrent ? null : customCoordinates(document.querySelector('#notification-location').value);
+    if (!useCurrent && !custom) throw new Error('Enter the custom location as latitude, longitude');
+    const latitude = useCurrent ? state.location.latitude : custom.latitude;
+    const longitude = useCurrent ? state.location.longitude : custom.longitude;
+    const notificationTimes = [...document.querySelectorAll('input[name="notification-time"]:checked')].map((input) => input.value);
+    if (!notificationTimes.length) throw new Error('Choose at least one notification time');
+    const customMinutes = notificationTimes.includes('custom') ? Math.round(Number(document.querySelector('#custom-hours').value) * 60) : null;
+    if (notificationTimes.includes('custom') && (!Number.isFinite(customMinutes) || customMinutes < 30 || customMinutes > 2160)) throw new Error('Choose a custom lead time between 0.5 and 36 hours');
     const response = await fetch('/api/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       email: document.querySelector('#email').value,
-      label: document.querySelector('#place-label').value || (useCurrent ? state.location.label : placeName(latitude, longitude)),
+      label: useCurrent ? state.location.label : placeName(latitude, longitude),
       latitude,
       longitude,
       threshold: Number(document.querySelector('#threshold').value),
+      notification_times: notificationTimes,
+      custom_minutes: customMinutes,
     }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail?.[0]?.msg || result.detail || 'Could not create watch');
@@ -227,5 +279,6 @@ document.querySelector('#notify-form').addEventListener('submit', async (event) 
 document.querySelector('#mobile-toggle').addEventListener('click', () => document.querySelector('.forecast-panel').classList.add('open'));
 document.querySelector('.location-block').addEventListener('click', () => document.querySelector('.forecast-panel').classList.toggle('open'));
 updateDayLabels();
+document.querySelectorAll('#day-tabs button').forEach((button) => button.classList.toggle('active', Number(button.dataset.day) === state.day));
 updateNotifyLocationPreview();
 loadForecast();
