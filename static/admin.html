@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11100f">
+  <title>Cloudset Control Room</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="admin-page">
+  <header class="admin-topbar">
+    <a class="brand light" href="/"><span class="brand-mark"><span></span></span><span>cloudset</span></a>
+    <span class="admin-divider"></span><strong>Control room</strong>
+    <div class="admin-top-actions"><span class="system-online"><i></i> System online</span><a href="/" target="_blank">Open public map ↗</a></div>
+  </header>
+  <main class="admin-shell">
+    <aside class="admin-sidebar">
+      <nav>
+        <button class="active"><span>⌁</span>Forecast area</button>
+        <button data-scroll="pipeline"><span>↻</span>Pipeline</button>
+        <button data-scroll="delivery"><span>◇</span>Delivery</button>
+      </nav>
+      <div class="admin-help"><span>?</span><p><strong>Forecast footprint</strong>The amber cells are scored. The dashed boundary shows the extra upstream area weather providers need.</p></div>
+    </aside>
+    <section class="admin-content">
+      <div class="admin-heading">
+        <div><span class="eyebrow">FORECAST CONFIGURATION</span><h1>Shape the search area</h1><p>Paint the cells Cloudset should evaluate. All editing stays in your browser until you save.</p></div>
+        <div class="admin-actions"><button class="ghost-button dark" id="reset-region">Reset East Coast</button><button class="primary-button" id="save-region">Save <span id="unsaved-count"></span></button></div>
+      </div>
+      <div class="admin-map-card">
+        <div class="paint-toolbar">
+          <div class="segmented"><button class="active" data-tool="add">＋ Add cells</button><button data-tool="remove">− Remove</button></div>
+          <button id="clear-region">Clear all</button>
+          <span class="cell-counter"><i></i><strong id="cell-count">—</strong> active cells</span>
+        </div>
+        <div id="admin-map"></div>
+        <div class="buffer-legend"><span class="active-cell"></span>Active forecast cell <span class="buffer-line"></span>Data buffer (~500 km)</div>
+      </div>
+      <section class="admin-stats" id="pipeline">
+        <article><span>ACTIVE FOOTPRINT</span><strong id="footprint-stat">—</strong><small>1° regions · adaptive 55→7 km tiles</small></article>
+        <article><span>LAST ENGINE RUN</span><strong id="runtime-stat">—</strong><small>Measured on this host</small></article>
+        <article><span>SUBSCRIBERS</span><strong id="subscriber-stat">—</strong><small>Email watch locations</small></article>
+        <article><span>DATA MODE</span><strong id="mode-stat">—</strong><small id="provider-stat">Provider</small></article>
+      </section>
+      <section class="pipeline-card">
+        <div><span class="eyebrow">PIPELINE</span><h2>Forecast engine</h2><p id="run-detail">Generate and cache the current field after changing the footprint.</p></div>
+        <button class="primary-button" id="run-now">Run now</button>
+      </section>
+      <section class="pipeline-card" id="delivery">
+        <div><span class="eyebrow">DELIVERY</span><h2>Email notifications</h2><p id="smtp-detail">Checking SMTP configuration…</p></div>
+        <button class="ghost-button dark" id="test-email">Run notification pass</button>
+      </section>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/assets/admin.js"></script>
+</body>
+</html>

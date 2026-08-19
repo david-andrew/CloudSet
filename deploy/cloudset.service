@@ -1,0 +1,18 @@
+[Unit]
+Description=Cloudset sunset forecast service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/cloudset
+EnvironmentFile=-%h/cloudset/.env
+ExecStart=%h/cloudset/.venv/bin/cloudset
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
+

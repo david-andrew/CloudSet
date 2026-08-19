@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11100f">
+  <title>Cloudset — Catch the sky on fire</title>
+  <meta name="description" content="Experimental fiery sunset forecasts for the East Coast.">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="public-page">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Cloudset home">
+      <span class="brand-mark"><span></span></span>
+      <span>cloudset</span>
+    </a>
+    <div class="topbar-actions">
+      <span class="data-status"><i></i><span id="data-status-text">Loading forecast</span></span>
+      <button class="ghost-button" id="about-button">How it works</button>
+      <button class="primary-button compact" id="notify-top">Notify me</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="forecast-panel">
+      <div class="location-block">
+        <span class="eyebrow">YOUR FORECAST</span>
+        <button class="location-button" id="location-button" aria-label="Choose location">
+          <span><strong id="location-name">New York City</strong><small id="coordinates">40.713° N · 74.006° W</small></span>
+          <span class="round-icon">⌖</span>
+        </button>
+      </div>
+
+      <section class="hero-forecast" aria-live="polite">
+        <div class="score-wrap">
+          <div class="score-ring" id="score-ring"><div><strong id="score">—</strong><small>/ 100</small></div></div>
+          <div class="score-copy">
+            <span class="tier-pill" id="tier">CALCULATING</span>
+            <h1 id="headline">Reading the sky</h1>
+            <p id="summary">Building the cloud and light-path forecast for your location.</p>
+          </div>
+        </div>
+        <div class="sunset-row">
+          <span class="sun-icon">☼</span>
+          <span><small>LOCAL SUNSET</small><strong id="sunset-time">—</strong></span>
+          <span class="sunset-note" id="sunset-note">Peak color near sunset</span>
+        </div>
+      </section>
+
+      <section class="timeline-section">
+        <div class="section-heading"><span>OUTLOOK</span><span id="selected-date">TODAY</span></div>
+        <div class="day-tabs" id="day-tabs">
+          <button class="active" data-day="0"><small>Today</small><strong>—</strong><i></i></button>
+          <button data-day="1"><small>Tomorrow</small><strong>—</strong><i></i></button>
+          <button data-day="2"><small>Day 3</small><strong>—</strong><i></i></button>
+          <button data-day="3"><small>Day 4</small><strong>—</strong><i></i></button>
+        </div>
+        <div class="scrubber">
+          <div class="scrubber-labels"><span>−60 min</span><strong id="offset-label">At sunset</strong><span>+60 min</span></div>
+          <input id="time-slider" type="range" min="-60" max="60" step="15" value="0" aria-label="Time around sunset">
+        </div>
+      </section>
+
+      <section class="ingredients-section">
+        <div class="section-heading"><span>WHY THIS FORECAST</span><button id="details-button">Details</button></div>
+        <div class="ingredient-grid">
+          <div class="ingredient"><span class="ingredient-icon cloud">⌁</span><div><small>Color canvas</small><strong id="cloud-value">—</strong></div><div class="mini-bar"><i id="cloud-bar"></i></div></div>
+          <div class="ingredient"><span class="ingredient-icon path">↙</span><div><small>Western opening</small><strong id="clear-value">—</strong></div><div class="mini-bar"><i id="clear-bar"></i></div></div>
+          <div class="ingredient"><span class="ingredient-icon rain">·</span><div><small>Rain obstruction</small><strong id="rain-value">—</strong></div><div class="mini-bar"><i id="rain-bar"></i></div></div>
+        </div>
+      </section>
+
+      <button class="notify-card" id="notify-card">
+        <span class="bell">♢</span>
+        <span><strong>Never miss a burning sky</strong><small>We'll email when your score clears your threshold.</small></span>
+        <span class="arrow">→</span>
+      </button>
+    </aside>
+
+    <section class="map-wrap">
+      <div id="map" aria-label="Sunset forecast map"></div>
+      <div class="map-top-left">
+        <div class="layer-switch" role="group" aria-label="Map layer">
+          <button class="active" data-layer="satellite">Satellite</button>
+          <button data-layer="map">Map</button>
+        </div>
+        <span class="satellite-age" id="satellite-age"><i></i> GOES-East · recent</span>
+      </div>
+      <div class="map-legend">
+        <span>FIERY SKY POTENTIAL</span>
+        <div class="gradient"></div>
+        <div><span>Quiet</span><span>Glow</span><span>Vivid</span><span>On fire</span></div>
+      </div>
+      <div class="map-hint">Click to move your forecast · <span id="resolution-indicator">loading grid</span></div>
+      <button class="mobile-panel-toggle" id="mobile-toggle">View forecast <span>↑</span></button>
+    </section>
+  </main>
+
+  <dialog id="notify-dialog">
+    <form method="dialog" class="dialog-card" id="notify-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <span class="dialog-kicker">SUNSET WATCH</span>
+      <h2>We'll watch the horizon.</h2>
+      <p>Get one email on promising days—early enough to find a good west-facing view.</p>
+      <label>Email address<input id="email" name="email" type="email" placeholder="you@example.com" required></label>
+      <fieldset class="notify-location-choice">
+        <legend>Alert location</legend>
+        <label class="location-choice active">
+          <input type="radio" name="notify-location" value="current" checked>
+          <span><strong>Use currently selected location</strong><small id="notify-current-location">New York City · 40.713° N, 74.006° W</small></span>
+        </label>
+        <label class="location-choice">
+          <input type="radio" name="notify-location" value="custom">
+          <span><strong>Use different coordinates</strong><small>Watch another home, viewpoint, or destination</small></span>
+        </label>
+        <div class="custom-location-fields" id="custom-location-fields" hidden>
+          <label>Latitude<input id="notify-latitude" type="number" min="-90" max="90" step="any" placeholder="40.7128"></label>
+          <label>Longitude<input id="notify-longitude" type="number" min="-180" max="180" step="any" placeholder="-74.0060"></label>
+        </div>
+      </fieldset>
+      <label>Location name<input id="place-label" name="label" type="text" placeholder="Home, Brooklyn, the lake…"></label>
+      <label class="threshold-label"><span>Alert me at <strong id="threshold-output">70</strong> or higher</span><input id="threshold" type="range" min="40" max="95" step="5" value="70"></label>
+      <button class="primary-button full" id="subscribe-button" value="default">Start watching the sky</button>
+      <small class="form-note" id="form-note">No spam. One location per signup. Unsubscribe support is the next production hardening item.</small>
+    </form>
+  </dialog>
+
+  <dialog id="about-dialog">
+    <article class="dialog-card about-card">
+      <button class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
+      <span class="dialog-kicker">BEHIND THE GLOW</span>
+      <h2>Not just “partly cloudy.”</h2>
+      <p>Cloudset looks for a reflecting canvas of middle and high clouds, a clear path toward the setting sun, limited low-cloud obstruction, useful aerosols, and no rain curtain.</p>
+      <p class="demo-warning"><strong>Current build:</strong> the map exercises the complete scoring and subscription flow with deterministic demo weather. It is clearly marked until HRRR/GOES ingestion is enabled.</p>
+    </article>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
