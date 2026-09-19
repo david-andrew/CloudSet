@@ -431,6 +431,11 @@ def manage_ui() -> FileResponse:
     return FileResponse(settings.root / "static" / "manage.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(settings.root / "static" / "favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/robots.txt", include_in_schema=False)
 def robots() -> Response:
     return Response("User-agent: *\nDisallow: /admin\nDisallow: /manage\nDisallow: /confirm\nDisallow: /unsubscribe\nDisallow: /api/\n", media_type="text/plain")

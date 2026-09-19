@@ -1,6 +1,6 @@
 # Cloudset
 
-Cloudset is a Pi-friendly app for finding the East Coast skies most likely to turn red, orange, magenta, and purple around sunset. It computes a spatial forecast first and then maps people and email watches onto it.
+Cloudset is a small self-hosted app for finding the East Coast skies most likely to turn red, orange, magenta, and purple around sunset. It computes a spatial forecast first and then maps people and email watches onto it.
 
 This repository is a working vertical slice:
 
@@ -20,7 +20,7 @@ uv run cloudset
 
 Open <http://127.0.0.1:8080> and <http://127.0.0.1:8080/admin>. The API schema is at <http://127.0.0.1:8080/docs>.
 
-Configuration is via the variables in [`.env.example`](.env.example). Without SMTP, eligible notifications are logged rather than sent; the admin test-email control still renders the exact message preview. Set `CLOUDSET_ADMIN_TOKEN` before making the admin endpoint accessible to anything beyond a trusted LAN.
+Configuration is via the variables in [`.env.example`](.env.example). Without SMTP, eligible notifications are logged rather than sent; the admin test-email control still renders the exact message preview. `CLOUDSET_ADMIN_TOKEN` and `CLOUDSET_SECRET_KEY` are required in production and warned about in development.
 
 Notification emails include the saved location and coordinates, a plain-text fallback, embedded close-up and regional OpenStreetMap images composited with the Cloudset forecast overlay, high-contrast labels, and location marker, plus a deep link back to the interactive outlook. Set `CLOUDSET_PUBLIC_URL` to the LAN address or public domain recipients should open. Basemap tiles are cached under ignored runtime data so repeated alerts remain lightweight.
 
@@ -33,23 +33,19 @@ uv run pytest
 curl http://127.0.0.1:8080/api/health
 ```
 
-The broad notification field takes roughly 1–2 seconds for about 1,800 demo output cells. The public map uses a separate on-demand tile pyramid: 0.5° at wide zooms, refining through 0.25° and 0.125° to 0.0625° (about 5–7 km) when zoomed in. Each 256×256 PNG tile is cached on disk by day, time offset, provider, and forecast-footprint revision. A Pi 4 should be entirely comfortable with this product shell; live HRRR ingestion must crop and aggregate data as described in [the forecasting design](docs/forecasting.md).
+The broad notification field takes roughly 1–2 seconds for about 1,800 demo output cells. The public map uses a separate on-demand tile pyramid: 0.5° at wide zooms, refining through 0.25° and 0.125° to 0.0625° (about 5–7 km) when zoomed in. Each 256×256 PNG tile is cached on disk by day, time offset, provider, and forecast-footprint revision. A 1 GB VM is comfortable for this workload; live HRRR ingestion crops and aggregates data as described in [the forecasting design](docs/forecasting.md).
 
-## Raspberry Pi 4
+## Deploy
 
-Install `uv` in the Pi user's account, copy the repository to `~/cloudset`, then:
+Production runs as two containers (the app and Caddy for HTTPS) on one small VM. The runbook, including first-time server setup, the `.env` checklist, backups, and how to recover admin access when your home IP changes, is in [`deploy/README.md`](deploy/README.md). The overall launch plan and rationale is in [`docs/launch-plan.md`](docs/launch-plan.md).
 
-```bash
-cd ~/cloudset
-uv sync
-cp .env.example .env
-mkdir -p ~/.config/systemd/user
-cp deploy/cloudset.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now cloudset
-```
+Key behaviours worth knowing before going public:
 
-For boot without an interactive login, enable linger for that Pi user (`loginctl enable-linger USER`) as an administrator. Put Caddy or Cloudflare Tunnel in front of only the public routes if the Pi accepts internet traffic; keep `/admin` LAN-only. A static GitHub Pages frontend is also possible: set an API base URL in the JavaScript and configure HTTPS/CORS on the Pi-facing API.
+- Signups are double opt-in. A watch stays `pending` and receives nothing until its confirmation link is opened.
+- Every alert carries signed manage and unsubscribe links plus `List-Unsubscribe` headers, so recipients can leave with one click from their mail client.
+- If an alert went out and a later check finds the score below the threshold, a single "the outlook has faded" notice is sent at the next reminder time the person chose.
+- The control room at `/admin` requires the admin token and, in production, is only reachable from the IPs in `CLOUDSET_ADMIN_ALLOW`.
+- Run one app process. The notification, HRRR, and GOES schedulers live inside it.
 
 ## Next implementation milestone
 

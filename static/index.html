@@ -2,12 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#11100f">
-  <title>Cloudset — Catch the sky on fire</title>
-  <meta name="description" content="Experimental fiery sunset forecasts for the East Coast.">
+  <title>Cloudset — Fiery sunset forecasts for the East Coast</title>
+  <meta name="description" content="Cloudset predicts where the sky is most likely to turn red, orange, and purple at sunset, and emails you when your spot looks good.">
+  <meta property="og:title" content="Cloudset — Catch the sky on fire">
+  <meta property="og:description" content="Sunset color forecasts for the East Coast, with email alerts for your favorite spot.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/assets/og.png">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://unpkg.com">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body class="public-page">
@@ -19,18 +24,26 @@
     <div class="topbar-actions">
       <span class="data-status"><i></i><span id="data-status-text">Loading forecast</span></span>
       <button class="ghost-button" id="about-button">How it works</button>
+      <a class="ghost-button donate-link" id="donate-top" href="#" target="_blank" rel="noopener" hidden>♥ Support</a>
       <button class="primary-button compact" id="notify-top">Notify me</button>
     </div>
   </header>
 
   <main class="app-shell">
-    <aside class="forecast-panel">
+    <div class="sheet-backdrop" id="sheet-backdrop"></div>
+    <aside class="forecast-panel" id="forecast-panel">
+      <button class="sheet-handle" id="sheet-handle" aria-label="Expand or collapse forecast"><span class="bar"></span><small id="sheet-label">Tap for the full forecast ↑</small></button>
       <div class="location-block">
         <span class="eyebrow">YOUR FORECAST</span>
-        <button class="location-button" id="location-button" aria-label="Choose location">
-          <span><strong id="location-name">New York City</strong><small id="coordinates">40.713° N · 74.006° W</small></span>
-          <span class="round-icon">⌖</span>
-        </button>
+        <div class="location-row">
+          <div class="location-text"><strong id="location-name">New York City</strong><small id="coordinates">40.713° N · 74.006° W</small></div>
+          <button class="round-icon" id="locate-button" title="Use my location" aria-label="Use my current location">⌖</button>
+        </div>
+        <form class="search-form" id="search-form" role="search" autocomplete="off">
+          <input id="search-input" type="search" placeholder="Search a town, park, or beach…" aria-label="Search for a place" maxlength="120">
+          <button type="submit" aria-label="Search">→</button>
+          <ul class="search-results" id="search-results" hidden></ul>
+        </form>
       </div>
 
       <section class="hero-forecast" aria-live="polite">
@@ -78,24 +91,43 @@
         <span><strong>Never miss a burning sky</strong><small>We'll email when your score clears your threshold.</small></span>
         <span class="arrow">→</span>
       </button>
+
+      <footer class="panel-footer">
+        <a href="#" id="donate-panel" target="_blank" rel="noopener" hidden>♥ Support Cloudset</a>
+        <button class="link-button" id="privacy-button">Privacy</button>
+        <span>Experimental. Look outside before you drive.</span>
+      </footer>
     </aside>
 
     <section class="map-wrap">
       <div id="map" aria-label="Sunset forecast map"></div>
       <div class="map-top-left">
-        <div class="layer-switch" role="group" aria-label="Map layer">
+        <div class="layer-switch" role="group" aria-label="Base map">
           <button class="active" data-layer="satellite">Satellite</button>
           <button data-layer="map">Map</button>
         </div>
         <span class="satellite-age" id="satellite-age"><i></i> GOES-East · recent</span>
       </div>
-      <div class="map-legend">
-        <span>FIERY SKY POTENTIAL</span>
-        <div class="gradient"></div>
-        <div><span>Quiet</span><span>Glow</span><span>Vivid</span><span>On fire</span></div>
+      <div class="overlay-control" id="overlay-control">
+        <div class="overlay-switch" role="group" aria-label="Forecast overlay">
+          <button class="active" data-overlay="potential">Sunset score</button>
+          <button data-overlay="clouds">Cloud canvas</button>
+          <button data-overlay="none">Off</button>
+        </div>
+        <div class="overlay-legend" id="legend-potential">
+          <div class="legend-title"><span>SUNSET POTENTIAL</span><span id="min-label">showing 60+</span></div>
+          <div class="gradient potential"></div>
+          <div class="gradient-labels"><span>Quiet</span><span>Glow</span><span>Vivid</span><span>On fire</span></div>
+          <label class="min-slider">Hide below <input id="min-slider" type="range" min="0" max="95" step="5" value="60" aria-label="Hide scores below"></label>
+        </div>
+        <div class="overlay-legend" id="legend-clouds" hidden>
+          <div class="legend-title"><span>MID / HIGH CLOUD CANVAS</span></div>
+          <div class="gradient clouds"></div>
+          <div class="gradient-labels"><span>Clear</span><span>Thin</span><span>Broken</span><span>Thick</span></div>
+          <small class="legend-help">Where the clouds that could light up are forecast to be.</small>
+        </div>
       </div>
       <div class="map-hint">Click to move your forecast · <span id="resolution-indicator">loading grid</span></div>
-      <button class="mobile-panel-toggle" id="mobile-toggle">View forecast <span>↑</span></button>
     </section>
   </main>
 
@@ -104,8 +136,8 @@
       <button class="dialog-close" id="notify-close" type="button" aria-label="Close">×</button>
       <span class="dialog-kicker">SUNSET WATCH</span>
       <h2>We'll watch the horizon.</h2>
-      <p>Choose when to hear about promising sunsets—early enough to find a good west-facing view.</p>
-      <label>Email address<input id="email" name="email" type="email" placeholder="you@example.com" required></label>
+      <p>Choose when to hear about promising sunsets, early enough to find a good west-facing view.</p>
+      <label>Email address<input id="email" name="email" type="email" placeholder="you@example.com" required autocomplete="email"></label>
       <label class="use-current-location">
         <input id="use-current-location" type="checkbox" checked>
         <span><strong>Use currently selected location</strong><small id="notify-current-location">New York City · 40.713° N, 74.006° W</small></span>
@@ -124,7 +156,7 @@
       </fieldset>
       <label class="threshold-label"><span>Alert me at <strong id="threshold-output">70</strong> or higher</span><input id="threshold" type="range" min="40" max="95" step="5" value="70"></label>
       <button class="primary-button full" id="subscribe-button" value="default">Start watching the sky</button>
-      <small class="form-note" id="form-note">No spam. One location per signup. Unsubscribe support is the next production hardening item.</small>
+      <small class="form-note" id="form-note">We'll send one confirmation email first. Every alert has links to change or stop your watch. If the outlook fades after we've alerted you, we'll tell you that too.</small>
     </form>
   </dialog>
 
@@ -133,12 +165,27 @@
       <button class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
       <span class="dialog-kicker">BEHIND THE GLOW</span>
       <h2>Not just “partly cloudy.”</h2>
-      <p>Cloudset looks for a reflecting canvas of middle and high clouds, a clear path toward the setting sun, limited low-cloud obstruction, useful aerosols, and no rain curtain.</p>
+      <p>Cloudset looks for a reflecting canvas of middle and high clouds, a clear path toward the setting sun, limited low-cloud obstruction, useful aerosols, and no rain curtain. The <strong>sunset score</strong> overlay shows how good the show could look <em>from</em> each place. The <strong>cloud canvas</strong> overlay shows where the clouds that would light up are forecast to be.</p>
       <p class="demo-warning" id="weather-source-note"><strong>Weather source:</strong> checking the latest forecast snapshot…</p>
+      <p class="about-links">
+        <a href="#" id="donate-about" target="_blank" rel="noopener" hidden>♥ Support the project on Ko-fi</a>
+        <a href="https://github.com/" id="source-link" target="_blank" rel="noopener" hidden>Source code</a>
+      </p>
+      <p class="attribution">Weather data: NOAA HRRR and NOAA GOES-East via NASA GIBS. Map imagery: Esri World Imagery, © OpenStreetMap contributors. Place search: Nominatim / OpenStreetMap.</p>
     </article>
   </dialog>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <dialog id="privacy-dialog">
+    <article class="dialog-card about-card">
+      <button class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
+      <span class="dialog-kicker">PRIVACY</span>
+      <h2>What we keep</h2>
+      <p>If you sign up for alerts, Cloudset stores your email address, the coordinates and name you chose, your alert settings, and a log of which alerts were sent. Nothing else. There are no accounts, no tracking scripts, and no ads.</p>
+      <p>Your last map position and overlay settings are saved in your own browser so the map opens where you left it. Unsubscribing removes you from all future emails immediately; you can also ask for your record to be deleted by replying to any alert.</p>
+    </article>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

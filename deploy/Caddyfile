@@ -1,0 +1,43 @@
+# Caddy terminates HTTPS (certificates from Let's Encrypt, renewed automatically)
+# and proxies to the app container. Values in {$...} come from .env.
+
+{$CLOUDSET_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# The control room is only reachable from the addresses listed in
+	# CLOUDSET_ADMIN_ALLOW (space separated IPs or CIDRs). Everyone else gets a
+	# plain 404 so the page's existence isn't advertised. The admin token is
+	# still required on top of this.
+	@admin path /admin /api/admin/*
+	handle @admin {
+		@allowed remote_ip {$CLOUDSET_ADMIN_ALLOW}
+		handle @allowed {
+			reverse_proxy app:8080
+		}
+		handle {
+			respond "Not found" 404
+		}
+	}
+
+	# Let the browser cache static assets and forecast tiles.
+	@assets path /assets/*
+	handle @assets {
+		header Cache-Control "public, max-age=86400"
+		reverse_proxy app:8080
+	}
+
+	handle {
+		reverse_proxy app:8080
+	}
+}
+
+www.{$CLOUDSET_DOMAIN} {
+	redir https://{$CLOUDSET_DOMAIN}{uri} permanent
+}

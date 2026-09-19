@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CLOUDSET_HOST: 0.0.0.0
+      CLOUDSET_PORT: "8080"
+      CLOUDSET_DB: /app/data/cloudset.db
+    volumes:
+      - ./data:/app/data
+    # Only reachable from the droplet itself (and through an SSH tunnel).
+    # Caddy talks to it over the compose network; the public never hits it directly.
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 900m
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:

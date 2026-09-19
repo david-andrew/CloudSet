@@ -114,7 +114,7 @@ document.querySelector('#ingest-goes').addEventListener('click', async (event) =
 });
 document.querySelector('#notification-pass').addEventListener('click', async (event) => {
   const button = event.currentTarget; button.disabled = true;
-  try { const result = await api('/api/admin/notifications/test', { method: 'POST' }); toast(`${result.sent} sent · ${result.skipped} skipped${result.errors.length ? ` · ${result.errors.length} errors` : ''}`); }
+  try { const result = await api('/api/admin/notifications/test', { method: 'POST' }); toast(`${result.sent} sent · ${result.skipped} skipped${result.errors.length ? ` · ${result.errors.length} errors` : ''}`); loadLog(); }
   catch (error) { toast(error.message); } finally { button.disabled = false; }
 });
 document.querySelector('#send-test-email').addEventListener('click', async (event) => {
@@ -137,12 +137,70 @@ document.querySelector('#send-test-email').addEventListener('click', async (even
 document.querySelectorAll('[data-scroll]').forEach((button) => button.addEventListener('click', () => document.querySelector(`#${button.dataset.scroll}`).scrollIntoView({ behavior: 'smooth' })));
 window.addEventListener('beforeunload', (event) => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 
+function cell(text, className) { const td = document.createElement('td'); td.textContent = text; if (className) td.className = className; return td; }
+
+async function loadSubscribers() {
+  const result = await api('/api/admin/subscriptions');
+  const counts = result.counts;
+  document.querySelector('#subscriber-counts').textContent = `· ${counts.active} active · ${counts.pending} pending · ${counts.unsubscribed} unsubscribed`;
+  document.querySelector('#subscriber-stat').textContent = counts.active;
+  const rows = document.querySelector('#subscriber-rows');
+  rows.innerHTML = '';
+  if (!result.subscriptions.length) { rows.innerHTML = '<tr><td colspan="7">No subscribers yet.</td></tr>'; return; }
+  result.subscriptions.forEach((s) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(cell(s.email));
+    tr.appendChild(cell(`${s.label || '—'} (${s.latitude.toFixed(3)}, ${s.longitude.toFixed(3)})`));
+    tr.appendChild(cell(String(s.threshold)));
+    tr.appendChild(cell(s.notification_times.map((t) => (t === 'custom' && s.custom_minutes ? `custom ${s.custom_minutes / 60}h` : t)).join(', ')));
+    tr.appendChild(cell(s.status, `status-${s.status}`));
+    tr.appendChild(cell(new Date(s.created_at).toLocaleDateString()));
+    const actions = document.createElement('td');
+    const send = document.createElement('button'); send.textContent = 'Send now';
+    send.addEventListener('click', async () => {
+      send.disabled = true;
+      try { const r = await api(`/api/admin/subscriptions/${s.id}/send`, { method: 'POST' }); toast(`Sent (${r.delivery}) · score ${Math.round(r.score)}`); loadLog(); }
+      catch (error) { toast(error.message); } finally { send.disabled = false; }
+    });
+    const remove = document.createElement('button'); remove.textContent = 'Delete';
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`Delete ${s.email} at ${s.label || 'this spot'}? This removes the record entirely.`)) return;
+      try { await api(`/api/admin/subscriptions/${s.id}`, { method: 'DELETE' }); toast('Deleted'); loadSubscribers(); }
+      catch (error) { toast(error.message); }
+    });
+    actions.appendChild(send); actions.appendChild(remove);
+    tr.appendChild(actions);
+    rows.appendChild(tr);
+  });
+}
+
+async function loadLog() {
+  const result = await api('/api/admin/notifications?limit=100');
+  const rows = document.querySelector('#log-rows');
+  rows.innerHTML = '';
+  if (!result.notifications.length) { rows.innerHTML = '<tr><td colspan="6">Nothing sent yet.</td></tr>'; return; }
+  result.notifications.forEach((n) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(cell(new Date(n.sent_at).toLocaleString()));
+    tr.appendChild(cell(n.email || `#${n.subscription_id}`));
+    tr.appendChild(cell(n.label || '—'));
+    tr.appendChild(cell(`${n.event_key} · ${n.forecast_date}`));
+    tr.appendChild(cell(n.event_key === 'confirmation' ? '—' : String(Math.round(n.score))));
+    tr.appendChild(cell(n.result));
+    rows.appendChild(tr);
+  });
+}
+
 async function init() {
   try {
     const [region, status] = await Promise.all([api('/api/admin/region'), api('/api/admin/status')]);
     state.active = new Set(region.active_cells); state.saved = new Set(region.active_cells);
     state.cells.forEach((_, key) => styleCell(key)); updateUI();
     document.querySelector('#subscriber-stat').textContent = status.subscribers;
+    const warnings = document.querySelector('#config-warnings');
+    if (status.warnings && status.warnings.length) { warnings.hidden = false; warnings.textContent = `Configuration: ${status.warnings.join(' · ')}`; }
+    loadSubscribers().catch((error) => toast(error.message));
+    loadLog().catch((error) => toast(error.message));
     document.querySelector('#mode-stat').textContent = status.mode.toUpperCase();
     document.querySelector('#provider-stat').textContent = status.provider;
     document.querySelector('#hrrr-detail').textContent = status.mode === 'live'

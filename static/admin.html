@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#11100f">
   <title>Cloudset Control Room</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body class="admin-page">
@@ -20,6 +22,8 @@
         <button class="active"><span>⌁</span>Forecast area</button>
         <button data-scroll="pipeline"><span>↻</span>Pipeline</button>
         <button data-scroll="delivery"><span>◇</span>Delivery</button>
+        <button data-scroll="subscribers"><span>☺</span>Subscribers</button>
+        <button data-scroll="log"><span>≡</span>Send log</button>
       </nav>
       <div class="admin-help"><span>?</span><p><strong>Forecast footprint</strong>The amber cells are scored. The dashed boundary shows the extra upstream area weather providers need.</p></div>
     </aside>
@@ -28,6 +32,7 @@
         <div><span class="eyebrow">FORECAST CONFIGURATION</span><h1>Shape the search area</h1><p>Paint the cells Cloudset should evaluate. All editing stays in your browser until you save.</p></div>
         <div class="admin-actions"><button class="ghost-button dark" id="reset-region">Reset East Coast</button><button class="primary-button" id="save-region">Save <span id="unsaved-count"></span></button></div>
       </div>
+      <div class="admin-warning" id="config-warnings" hidden></div>
       <div class="admin-map-card">
         <div class="paint-toolbar">
           <div class="segmented"><button class="active" data-tool="add">＋ Add cells</button><button data-tool="remove">− Remove</button></div>
@@ -64,10 +69,24 @@
         </div>
         <pre id="email-preview" hidden></pre>
       </section>
+      <section class="admin-table-card" id="subscribers">
+        <h2>Subscribers <small id="subscriber-counts"></small></h2>
+        <table class="admin-table">
+          <thead><tr><th>EMAIL</th><th>SPOT</th><th>THRESHOLD</th><th>TIMES</th><th>STATUS</th><th>CREATED</th><th></th></tr></thead>
+          <tbody id="subscriber-rows"><tr><td colspan="7">Loading…</td></tr></tbody>
+        </table>
+      </section>
+      <section class="admin-table-card" id="log">
+        <h2>Recent sends</h2>
+        <table class="admin-table">
+          <thead><tr><th>WHEN</th><th>EMAIL</th><th>SPOT</th><th>EVENT</th><th>SCORE</th><th>RESULT</th></tr></thead>
+          <tbody id="log-rows"><tr><td colspan="6">Loading…</td></tr></tbody>
+        </table>
+      </section>
     </section>
   </main>
   <div class="toast" id="toast"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/assets/admin.js"></script>
 </body>
 </html>
