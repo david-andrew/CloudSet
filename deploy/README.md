@@ -81,6 +81,7 @@ curl https://cloudset.dev/api/health
 | `CLOUDSET_SECRET_KEY` | `openssl rand -hex 24`, never change it once emails have gone out |
 | `CLOUDSET_ADMIN_ALLOW` | your home IP, e.g. `73.132.82.112/32` (find it with `curl -4 ifconfig.me`) |
 | `CLOUDSET_FORECAST_MODE` | `auto` |
+| `CLOUDSET_SMTP_PORT` | `2587`. DigitalOcean blocks the usual 587 and 465; Resend's 2587 works |
 | `CLOUDSET_SMTP_PASSWORD` | the Resend API key |
 | `CLOUDSET_DONATE_URL` | your Ko-fi page |
 
@@ -147,6 +148,16 @@ docker compose stop app
 gunzip -c ~/backups/cloudset-YYYYMMDD-HHMMSS.db.gz > data/cloudset.db
 docker compose start app
 ```
+
+Test emails never arrive and the log shows `TimeoutError` from `smtplib`:
+outbound SMTP is blocked by the host. Check which ports are open with
+
+```bash
+for p in 587 2587 465 2465; do timeout 5 bash -c "</dev/tcp/smtp.resend.com/$p" && echo "$p open" || echo "$p blocked"; done
+```
+
+and set `CLOUDSET_SMTP_PORT` to an open one (2587 for STARTTLS), then
+`docker compose up -d app`.
 
 ## 6. Sizing notes
 
