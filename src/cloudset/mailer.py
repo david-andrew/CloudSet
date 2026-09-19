@@ -63,6 +63,7 @@ def build_forecast_message(
         f"Sunset: {sunset}\n"
         f"Mid/high cloud: {props['mid_cloud']}% / {props['high_cloud']}%\n"
         f"Clear western light path: {props['western_clearance']}%\n\n"
+        f"Smoke aerosol optical depth: {props['aerosol_optical_depth']:.2f}\n\n"
         "The maps in the HTML version show close-up and regional views of the Cloudset forecast overlay and your marked location.\n\n"
         f"Open your interactive outlook: {interactive_url}\n\n"
         "Cloudset is experimental. Look outside before making a trip."
@@ -112,6 +113,7 @@ def build_forecast_message(
 <td width="10"></td>
 <td style="padding:12px;background:#f2efe9;border-radius:7px"><span style="font-size:11px;color:#817a73">WESTERN LIGHT PATH</span><br><strong>{props['western_clearance']}% clear</strong></td>
 </tr></table>
+<p style="margin:12px 0 0;padding:12px;background:#f2efe9;border-radius:7px;font-size:13px"><span style="font-size:11px;color:#817a73">SMOKE AEROSOL OPTICAL DEPTH</span><br><strong>{props['aerosol_optical_depth']:.2f} AOD</strong></p>
 <p style="margin:20px 0 0;color:#8a837c;font-size:11px;line-height:1.5">The colored overlay shows Cloudset's fiery-sky potential derived from the cloud forecast. Map data © OpenStreetMap contributors; label cartography © CARTO. Cloudset is experimental—look outside before making a trip.</p>
 </td></tr></table>
 </td></tr></table>

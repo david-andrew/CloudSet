@@ -102,6 +102,16 @@ document.querySelector('#ingest-now').addEventListener('click', async (event) =>
   } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = 'Fetch HRRR now'; }
 });
+document.querySelector('#ingest-goes').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true; button.textContent = 'Fetching GOES tiles…';
+  try {
+    const result = await api('/api/admin/goes/ingest', { method: 'POST' });
+    const observation = result.observation;
+    document.querySelector('#goes-detail').textContent = `Observed ${new Date(observation.observed_utc).toLocaleString()} · motion confidence ${Math.round(observation.motion_confidence * 100)}% · ${(observation.raw_bytes / 1048576).toFixed(1)} MB.`;
+    toast('GOES-East cloud correction refreshed');
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = 'Fetch GOES now'; }
+});
 document.querySelector('#notification-pass').addEventListener('click', async (event) => {
   const button = event.currentTarget; button.disabled = true;
   try { const result = await api('/api/admin/notifications/test', { method: 'POST' }); toast(`${result.sent} sent · ${result.skipped} skipped${result.errors.length ? ` · ${result.errors.length} errors` : ''}`); }
@@ -138,6 +148,9 @@ async function init() {
     document.querySelector('#hrrr-detail').textContent = status.mode === 'live'
       ? `${status.model_run}. Compact snapshot is ready for the active forecast footprint.`
       : 'No current HRRR snapshot is loaded. The public map is using its labeled demo fallback.';
+    document.querySelector('#goes-detail').textContent = status.goes.available
+      ? `Latest observation ${new Date(status.goes.observed_utc).toLocaleString()} · ${Math.round(status.goes.age_minutes)} minutes old${status.goes.correction ? ` · active at ${Math.round(status.goes.correction.weight * 100)}% weight` : ' · retained for the next sunset window'}.`
+      : 'No compact GOES observation has been ingested yet. HRRR remains the active baseline.';
     document.querySelector('#smtp-detail').textContent = status.smtp_configured ? 'SMTP is configured. The scheduler checks eligible subscribers every 15 minutes.' : 'SMTP is not configured. Notification messages are logged safely instead of sent.';
     if (status.last_run) { document.querySelector('#runtime-stat').textContent = `${Math.round(status.last_run.duration_ms)} ms`; document.querySelector('#run-detail').textContent = `Last run #${status.last_run.id} completed ${status.last_run.cells} cells.`; }
     else document.querySelector('#runtime-stat').textContent = 'Not run';

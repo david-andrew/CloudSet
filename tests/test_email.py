@@ -56,6 +56,7 @@ def test_forecast_email_has_location_html_map_and_plain_fallback():
             "mid_cloud": 42,
             "high_cloud": 76,
             "western_clearance": 88,
+            "aerosol_optical_depth": 0.12,
         },
     }
     settings = replace(main.settings, smtp_host="", public_url="https://cloudset.example")

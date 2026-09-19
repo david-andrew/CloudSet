@@ -6,5 +6,6 @@ data/*.db*
 data/*.json
 data/tile_cache/
 data/hrrr/
+data/goes/
 data/email_map_cache/
 .env

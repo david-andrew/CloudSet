@@ -83,6 +83,7 @@ input[type=range] { accent-color: var(--amber); width: 100%; }
 .ingredient-icon.cloud { color: #75527f; background: #eee6f0; }
 .ingredient-icon.path { color: #ba582e; background: #f6e5d9; }
 .ingredient-icon.rain { color: #58788b; background: #e3edf1; }
+.ingredient-icon.aerosol { color: #9a6b20; background: #f5ead0; }
 .ingredient small, .ingredient strong { display: block; }
 .ingredient small { color: #918981; font-size: 9px; }
 .ingredient strong { font: 600 11px "Manrope"; }

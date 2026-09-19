@@ -26,7 +26,8 @@ from .solar import sunset_utc
 log = logging.getLogger(__name__)
 NOMADS_FILTER = "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl"
 GRID_RESOLUTION = 0.0625
-FIELD_NAMES = {"lcc", "mcc", "hcc", "vis", "prate"}
+HRRR_SUBSET_VERSION = "v3-aotk-layer"
+FIELD_NAMES = {"lcc", "mcc", "hcc", "vis", "prate", "aotk"}
 
 
 def bounds_for_region(active: list[str]) -> tuple[float, float, float, float]:
@@ -60,11 +61,13 @@ def _download_url(cycle: datetime, lead: int, bounds: tuple[float, float, float,
         "lev_high_cloud_layer": "on",
         "lev_surface": "on",
         "lev_entire_atmosphere": "on",
+        "lev_entire_atmosphere_(considered_as_a_single_layer)": "on",
         "var_LCDC": "on",
         "var_MCDC": "on",
         "var_HCDC": "on",
         "var_VIS": "on",
         "var_PRATE": "on",
+        "var_AOTK": "on",
         "subregion": "",
         "leftlon": str(west),
         "rightlon": str(east),
@@ -87,7 +90,7 @@ class HrrrIngestor:
 
     def _download(self, cycle: datetime, lead: int, bounds: tuple[float, float, float, float]) -> Path:
         bounds_key = "_".join(str(int(value)) for value in bounds)
-        path = self.raw_root / f"hrrr_{cycle:%Y%m%d_%H}_f{lead:02d}_{bounds_key}.grib2"
+        path = self.raw_root / f"hrrr_{cycle:%Y%m%d_%H}_f{lead:02d}_{bounds_key}_{HRRR_SUBSET_VERSION}.grib2"
         if path.exists() and path.stat().st_size > 100_000:
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +135,13 @@ class HrrrIngestor:
             while (message := codes_grib_new_from_file(stream)) is not None:
                 try:
                     name = str(codes_get(message, "shortName"))
+                    if (
+                        name == "unknown"
+                        and int(codes_get(message, "parameterCategory")) == 20
+                        and int(codes_get(message, "parameterNumber")) == 102
+                        and str(codes_get(message, "typeOfLevel")) == "atmosphereSingleLayer"
+                    ):
+                        name = "aotk"
                     if name not in FIELD_NAMES:
                         continue
                     raw_fields[name] = np.asarray(codes_get_values(message), dtype=np.float32)
@@ -194,6 +204,7 @@ class HrrrIngestor:
             high_cloud=fields["hcc"].astype(np.float32) / 100,
             visibility=fields["vis"].astype(np.float32),
             precip_rate=fields["prate"].astype(np.float32),
+            aerosol_optical_depth=np.clip(fields["aotk"], 0, 5).astype(np.float32),
             texture=texture,
             metadata=np.asarray(json.dumps(metadata)),
         )
@@ -212,10 +223,11 @@ class HrrrIngestor:
 
 
 class HrrrWeatherProvider:
-    name = "hrrr-live+demo-fallback"
+    name = "hrrr+goes-live+demo-fallback"
 
-    def __init__(self, fields_root: Path):
+    def __init__(self, fields_root: Path, observations=None):
         self.fields_root = fields_root
+        self.observations = observations
         self.fallback = DemoWeatherProvider()
         self._cache: OrderedDict[date, dict] = OrderedDict()
         self._lock = threading.RLock()
@@ -264,14 +276,28 @@ class HrrrWeatherProvider:
         low = self._sample(data, "low_cloud", latitudes, longitudes)
         mid = self._sample(data, "mid_cloud", latitudes, longitudes)
         high = self._sample(data, "high_cloud", latitudes, longitudes)
+        if self.observations is not None:
+            correction = self.observations.sample(latitudes, longitudes, day)
+            if correction is not None:
+                observed_cloud, weight = correction
+                # Band 13 is most informative for the colder middle/high cloud
+                # deck that can reflect sunset color. Blend conservatively so
+                # the model still supplies vertical structure and future growth.
+                mid = mid * (1 - weight) + observed_cloud * weight
+                high = high * (1 - weight) + observed_cloud * weight
         west_low = self._sample(data, "low_cloud", latitudes, longitudes - 4.0)
         precip_rate = self._sample(data, "precip_rate", latitudes, longitudes) * 3600
         visibility = self._sample(data, "visibility", latitudes, longitudes)
+        aerosol = (
+            self._sample(data, "aerosol_optical_depth", latitudes, longitudes)
+            if "aerosol_optical_depth" in data
+            else np.full_like(low, 0.09)
+        )
         return WeatherField(
             low_cloud=np.clip(low, 0, 1),
             mid_cloud=np.clip(mid, 0, 1),
             high_cloud=np.clip(high, 0, 1),
-            aerosol=np.full_like(low, 0.09),
+            aerosol=np.clip(aerosol, 0, 5),
             precip=np.clip(precip_rate / 1.0, 0, 1),
             texture=np.clip(self._sample(data, "texture", latitudes, longitudes), 0, 1),
             western_clearance=np.clip(1 - west_low, 0, 1),
@@ -284,16 +310,24 @@ class HrrrWeatherProvider:
             return {"mode": "demo", "model_run": "DEMO fallback · HRRR snapshot unavailable", "confidence": 42}
         metadata = json.loads(str(data["metadata"]))
         cycle = datetime.fromisoformat(metadata["cycle_utc"])
-        return {
+        result = {
             "mode": "live",
             "model_run": f"HRRR {cycle:%Y-%m-%d %HZ} · F{metadata['forecast_hour']:02d}",
             "confidence": round(max(50, 80 - metadata["forecast_hour"] * 0.6)),
             **metadata,
         }
+        correction = self.observations.correction(day) if self.observations is not None else None
+        if correction:
+            result["model_run"] += " · GOES corrected"
+            result["satellite_correction"] = correction
+        else:
+            result["satellite_correction"] = None
+        return result
 
     def cache_key(self, day: date) -> str:
         metadata = self.metadata(day)
-        return f"{self.name}-{metadata.get('cycle_utc', 'fallback')}-f{metadata.get('forecast_hour', 0)}"
+        observation_key = self.observations.cache_key(day) if self.observations is not None else "no-goes"
+        return f"{self.name}-{metadata.get('cycle_utc', 'fallback')}-f{metadata.get('forecast_hour', 0)}-{observation_key}"
 
 
 def run() -> None:

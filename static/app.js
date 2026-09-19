@@ -1,8 +1,12 @@
 /* global L */
 const linkParams = new URLSearchParams(window.location.search);
-const linkedLatitude = Number(linkParams.get('lat'));
-const linkedLongitude = Number(linkParams.get('lon'));
-const hasLinkedLocation = Number.isFinite(linkedLatitude) && Number.isFinite(linkedLongitude)
+const linkedLatitudeValue = linkParams.get('lat');
+const linkedLongitudeValue = linkParams.get('lon');
+const linkedLatitude = Number(linkedLatitudeValue);
+const linkedLongitude = Number(linkedLongitudeValue);
+const hasLinkedLocation = linkParams.has('lat') && linkParams.has('lon')
+  && linkedLatitudeValue.trim() !== '' && linkedLongitudeValue.trim() !== ''
+  && Number.isFinite(linkedLatitude) && Number.isFinite(linkedLongitude)
   && linkedLatitude >= -90 && linkedLatitude <= 90 && linkedLongitude >= -180 && linkedLongitude <= 180;
 
 function linkedDayOffset(value) {
@@ -104,9 +108,14 @@ function updatePanel(feature) {
   document.querySelector('#cloud-value').textContent = `${cloud}% mid / high`;
   document.querySelector('#clear-value').textContent = `${p.western_clearance}% open`;
   document.querySelector('#rain-value').textContent = p.precip_risk < 15 ? 'Low' : `${p.precip_risk}% risk`;
+  const aerosolLabel = p.aerosol_optical_depth < 0.05 ? 'very clear'
+    : p.aerosol_optical_depth <= 0.25 ? 'color-friendly'
+      : p.aerosol_optical_depth <= 0.5 ? 'hazy' : 'dense smoke / haze';
+  document.querySelector('#aerosol-value').textContent = `${p.aerosol_optical_depth.toFixed(2)} AOD · ${aerosolLabel}`;
   setBar('#cloud-bar', cloud);
   setBar('#clear-bar', p.western_clearance);
   setBar('#rain-bar', 100 - p.precip_risk);
+  setBar('#aerosol-bar', Math.min(100, p.aerosol_optical_depth * 200));
 }
 
 function updateNotifyLocationPreview() {
@@ -163,7 +172,7 @@ async function loadForecast() {
     const live = meta.mode === 'live';
     document.querySelector('#data-status-text').textContent = live ? `Live · ${meta.model_run}` : 'Demo fallback · live solar geometry';
     document.querySelector('#weather-source-note').innerHTML = live
-      ? `<strong>Current weather data:</strong> ${meta.model_run}, spatially normalized to the 5–7 km forecast layer. GOES-East imagery remains live in the map.`
+      ? `<strong>Current weather data:</strong> ${meta.model_run}, spatially normalized to the 5–7 km forecast layer. ${meta.data_source.satellite_correction ? 'Recent GOES-East infrared observations are correcting cloud placement near sunset.' : 'GOES-East imagery remains live in the map; observed correction activates during the final three hours.'}`
       : '<strong>Demo fallback:</strong> a current HRRR snapshot is unavailable. Scores use deterministic demo weather and remain clearly labeled.';
     document.querySelector('#selected-date').textContent = state.day === 0 ? 'TODAY' : new Date(Date.now() + state.day * 86400000).toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
   } catch (error) {

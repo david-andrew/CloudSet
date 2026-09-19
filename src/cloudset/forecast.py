@@ -136,6 +136,9 @@ class ForecastEngine:
         reflector_fit = np.exp(-((reflector - 0.62) / 0.32) ** 2)
         low_clear = 1 - field.low_cloud**1.35
         aerosol_fit = np.exp(-((field.aerosol - 0.12) / 0.10) ** 2)
+        # A modest aerosol layer can deepen warm colors, while dense smoke or
+        # haze attenuates the already-long optical path near the horizon.
+        aerosol_extinction = np.clip((field.aerosol - 0.35) / 0.65, 0, 1)
         dry = (1 - field.precip) * (0.72 + 0.28 * field.visibility_clarity)
         ingredients = (
             0.34 * reflector_fit * np.clip(reflector / 0.45, 0, 1)
@@ -146,7 +149,15 @@ class ForecastEngine:
             + 0.07 * dry
         )
         # Low clouds and precipitation can block even an otherwise ideal deck.
-        scores = np.clip(100 * ingredients * (1 - 0.48 * field.precip) * (0.68 + 0.32 * low_clear), 0, 99)
+        scores = np.clip(
+            100
+            * ingredients
+            * (1 - 0.48 * field.precip)
+            * (0.68 + 0.32 * low_clear)
+            * (1 - 0.35 * aerosol_extinction),
+            0,
+            99,
+        )
         if minute_offset:
             scores *= math.exp(-((minute_offset - 4) / 47) ** 2)
         return scores, field

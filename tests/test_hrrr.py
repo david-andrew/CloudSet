@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import numpy as np
 
 from cloudset.forecast import default_region
-from cloudset.hrrr import HrrrWeatherProvider, _extended_cycle_for, bounds_for_region
+from cloudset.hrrr import HrrrWeatherProvider, _download_url, _extended_cycle_for, bounds_for_region
 
 
 def test_cycle_selection_uses_latest_available_extended_run():
@@ -21,6 +21,13 @@ def test_region_bounds_include_upstream_buffer():
     assert south <= 22
     assert east >= -63
     assert north >= 51
+
+
+def test_subset_requests_smoke_aerosol_optical_depth():
+    url = _download_url(datetime(2026, 8, 19, tzinfo=timezone.utc), 24, (-91, 22, -63, 51))
+    assert "var_AOTK=on" in url
+    assert "lev_entire_atmosphere=on" in url
+    assert "lev_entire_atmosphere_%28considered_as_a_single_layer%29=on" in url
 
 
 def test_live_provider_reads_compact_snapshot(tmp_path):
@@ -49,3 +56,44 @@ def test_live_provider_reads_compact_snapshot(tmp_path):
     assert np.isclose(field.mid_cloud[0], 0.6)
     assert np.isclose(field.high_cloud[0], 0.8)
     assert field.visibility_clarity[0] == 1
+
+
+def test_live_provider_blends_recent_goes_cloud_observation(tmp_path):
+    day = date(2026, 8, 18)
+    metadata = {
+        "cycle_utc": "2026-08-18T18:00:00+00:00",
+        "forecast_hour": 6,
+        "valid_utc": "2026-08-19T00:00:00+00:00",
+    }
+    shape = (2, 2)
+    np.savez_compressed(
+        tmp_path / f"{day.isoformat()}.npz",
+        latitude=np.array([40.0, 40.0625], dtype=np.float32),
+        longitude=np.array([-74.0, -73.9375], dtype=np.float32),
+        low_cloud=np.full(shape, 0.2, dtype=np.float32),
+        mid_cloud=np.full(shape, 0.6, dtype=np.float32),
+        high_cloud=np.full(shape, 0.8, dtype=np.float32),
+        visibility=np.full(shape, 10_000, dtype=np.float32),
+        precip_rate=np.zeros(shape, dtype=np.float32),
+        texture=np.full(shape, 0.7, dtype=np.float32),
+        metadata=np.asarray(json.dumps(metadata)),
+    )
+
+    class Observations:
+        @staticmethod
+        def sample(latitudes, _longitudes, _day):
+            return np.full_like(latitudes, 0.2), 0.5
+
+        @staticmethod
+        def correction(_day):
+            return {"observed_utc": "2026-08-18T22:00:00+00:00", "weight": 0.5}
+
+        @staticmethod
+        def cache_key(_day):
+            return "observed"
+
+    provider = HrrrWeatherProvider(tmp_path, Observations())
+    field = provider.field(np.array([40.02]), np.array([-73.98]), day)
+    assert np.isclose(field.mid_cloud[0], 0.4)
+    assert np.isclose(field.high_cloud[0], 0.5)
+    assert "GOES corrected" in provider.metadata(day)["model_run"]

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 from .config import Settings, get_settings
 from .email_map import render_email_map
 from .forecast import REGION_BOUNDS, ForecastEngine, default_region
+from .goes import GoesIngestor, GoesObservationProvider, should_refresh_goes
 from .hrrr import HrrrIngestor, HrrrWeatherProvider
 from .mailer import plain_text_content, send_forecast
 from .solar import sunset_utc
@@ -27,10 +28,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger(__name__)
 settings = get_settings()
 store = Store(settings.db_path)
-live_provider = HrrrWeatherProvider(settings.root / "data" / "hrrr" / "fields")
+goes_observations = GoesObservationProvider(settings.root / "data" / "goes" / "fields")
+live_provider = HrrrWeatherProvider(settings.root / "data" / "hrrr" / "fields", goes_observations)
 engine = ForecastEngine(live_provider if settings.forecast_mode in {"auto", "live"} else None)
 tile_pyramid = ForecastTilePyramid(settings.root / "data" / "tile_cache", engine)
 hrrr_ingestor = HrrrIngestor(settings.root / "data" / "hrrr")
+goes_ingestor = GoesIngestor(settings.root / "data" / "goes")
 FORECAST_TIMEZONE = ZoneInfo("America/New_York")
 
 
@@ -215,11 +218,27 @@ async def hrrr_scheduler() -> None:
         await asyncio.sleep(60 * 60)
 
 
+async def goes_scheduler() -> None:
+    await asyncio.sleep(20)
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            if should_refresh_goes(now):
+                result = await asyncio.to_thread(goes_ingestor.refresh, _active_region(), now)
+                goes_observations.invalidate()
+                live_provider.invalidate()
+                _cache.clear()
+                log.info("GOES-East correction refresh complete: %s", result)
+        except Exception:
+            log.exception("GOES-East correction refresh failed; HRRR remains active")
+        await asyncio.sleep(10 * 60)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     tasks = [asyncio.create_task(scheduler())]
     if settings.forecast_mode in {"auto", "live"}:
-        tasks.append(asyncio.create_task(hrrr_scheduler()))
+        tasks.extend((asyncio.create_task(hrrr_scheduler()), asyncio.create_task(goes_scheduler())))
     yield
     for task in tasks:
         task.cancel()
@@ -446,6 +465,17 @@ def ingest_hrrr() -> dict:
     return {"ok": True, "runs": results}
 
 
+@app.post("/api/admin/goes/ingest", dependencies=[Depends(require_admin)])
+def ingest_goes() -> dict:
+    if settings.forecast_mode not in {"auto", "live"}:
+        raise HTTPException(status_code=409, detail="Set CLOUDSET_FORECAST_MODE=auto or live to enable GOES")
+    result = goes_ingestor.refresh(_active_region())
+    goes_observations.invalidate()
+    live_provider.invalidate()
+    _cache.clear()
+    return {"ok": True, "observation": result}
+
+
 @app.post("/api/admin/run", dependencies=[Depends(require_admin)])
 def run_forecast() -> dict:
     _cache.clear()
@@ -519,6 +549,7 @@ def admin_status() -> dict:
         "configured_mode": settings.forecast_mode,
         "model_run": provider_meta["model_run"],
         "data_source": provider_meta,
+        "goes": goes_observations.status(today),
         "provider": provider_meta.get("source", "demo-atmosphere"),
         "active_cells": len(_active_region()),
         "forecast_cells": len(_active_region()) * 4,

@@ -7,9 +7,9 @@ This repository is a working vertical slice:
 - public GOES/satellite + adaptive forecast-tile map, day/time scrubber, click-to-relocate, and email signup with selectable reminder times;
 - local control room with a paintable forecast footprint, upstream-data buffer, run controls, delivery status, and test-email preview/send;
 - vectorized scoring, solar geometry, SQLite persistence, SMTP delivery, and a 15-minute notification scheduler;
-- live NOAA HRRR sunset snapshots with deterministic demo fallback when NOAA data is unavailable.
+- live NOAA HRRR cloud/smoke snapshots, near-sunset GOES-East infrared cloud-motion correction, and deterministic demo fallback when live data is unavailable.
 
-With `CLOUDSET_FORECAST_MODE=auto`, the service downloads narrowly cropped NOAA HRRR low/mid/high cloud, visibility, and precipitation fields for tonight and tomorrow. It normalizes each valid time to a compact 0.0625° NumPy snapshot and refreshes hourly. If the upstream cycle is unavailable, the UI and API explicitly switch to the deterministic demo fallback rather than presenting stale/demo data as live.
+With `CLOUDSET_FORECAST_MODE=auto`, the service downloads narrowly cropped NOAA HRRR low/mid/high cloud, visibility, precipitation, and smoke aerosol optical depth fields for tonight and tomorrow. It normalizes each valid time to a compact 0.0625° NumPy snapshot and refreshes hourly. Moderate smoke AOD receives only a bounded color bonus; dense smoke/haze incurs an extinction penalty. During the final hours before sunset, two small NASA GIBS GOES-East Band 13 frames provide an observed cloud field and motion correction at the same resolution. If the upstream model cycle is unavailable, the UI and API explicitly switch to the deterministic demo fallback rather than presenting stale/demo data as live.
 
 ## Run locally
 
@@ -24,7 +24,7 @@ Configuration is via the variables in [`.env.example`](.env.example). Without SM
 
 Notification emails include the saved location and coordinates, a plain-text fallback, embedded close-up and regional OpenStreetMap images composited with the Cloudset forecast overlay, high-contrast labels, and location marker, plus a deep link back to the interactive outlook. Set `CLOUDSET_PUBLIC_URL` to the LAN address or public domain recipients should open. Basemap tiles are cached under ignored runtime data so repeated alerts remain lightweight.
 
-Fetch live snapshots immediately with `uv run cloudset-ingest`, or use **Fetch HRRR now** in the admin control room. The background scheduler performs the same refresh hourly in `auto`/`live` mode.
+Fetch live model snapshots immediately with `uv run cloudset-ingest`, or use **Fetch HRRR now** in the admin control room. **Fetch GOES now** exercises the satellite correction manually; automatically it polls every ten minutes only from four hours before through one hour after sunset. The HRRR background refresh remains hourly in `auto`/`live` mode.
 
 ## Verify
 
@@ -53,7 +53,7 @@ For boot without an interactive login, enable linger for that Pi user (`loginctl
 
 ## Next implementation milestone
 
-Add a GOES cloud-motion correction to the live HRRR baseline, followed by aerosol/smoke input and observed-outcome calibration. The reasoning, ordering, and resource constraints are in [the forecasting design](docs/forecasting.md). The `WeatherProvider` boundary keeps those additions independent from either UI and notification logic.
+Add observed-outcome collection and calibration, followed by NEXRAD precipitation/virga veto refinement. The reasoning, ordering, and resource constraints are in [the forecasting design](docs/forecasting.md). The `WeatherProvider` boundary keeps those additions independent from either UI and notification logic.
 
 ## Data attribution
 
