@@ -14,6 +14,21 @@ from .forecast import ForecastEngine
 
 TILE_SIZE = 256
 ZOOM_RESOLUTIONS = ((5, 0.5), (6, 0.25), (7, 0.125), (30, 0.0625))
+LAYERS = ("potential", "clouds")
+MIN_STEP = 5
+
+# Sunset potential uses a cool sequential ramp so it reads as "a score here",
+# distinct from the warm ramp that shows where the reflecting clouds are.
+POTENTIAL_STOPS = np.asarray([0, 30, 50, 68, 82, 99], dtype=np.float32)
+POTENTIAL_COLORS = np.asarray(
+    [[52, 70, 128], [46, 108, 176], [34, 150, 176], [56, 184, 138], [128, 212, 84], [218, 240, 70]],
+    dtype=np.float32,
+)
+CLOUD_STOPS = np.asarray([0, 25, 45, 65, 85, 100], dtype=np.float32)
+CLOUD_COLORS = np.asarray(
+    [[122, 132, 128], [174, 172, 139], [241, 176, 63], [233, 93, 45], [167, 45, 89], [91, 43, 126]],
+    dtype=np.float32,
+)
 
 
 def resolution_for_zoom(zoom: int) -> float:
@@ -21,6 +36,10 @@ def resolution_for_zoom(zoom: int) -> float:
         if zoom <= maximum:
             return resolution
     return 0.0625
+
+
+def quantize_min(value: int) -> int:
+    return int(max(0, min(95, round(value / MIN_STEP) * MIN_STEP)))
 
 
 def _mercator_lat(tile_y: np.ndarray, scale: int) -> np.ndarray:
@@ -43,16 +62,27 @@ def cache_key(active: list[str], provider: str, day: date, minute_offset: int) -
     return f"{day.isoformat()}_{minute_offset:+03d}_{provider}_{footprint}"
 
 
-def _rgba(scores: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    stops = np.asarray([0, 35, 48, 68, 82, 99], dtype=np.float32)
-    colors = np.asarray(
-        [[122, 132, 128], [174, 172, 139], [241, 176, 63], [233, 93, 45], [167, 45, 89], [91, 43, 126]],
-        dtype=np.float32,
-    )
-    rgba = np.zeros((*scores.shape, 4), dtype=np.uint8)
+def _ramp(values: np.ndarray, stops: np.ndarray, colors: np.ndarray) -> np.ndarray:
+    rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
     for channel in range(3):
-        rgba[..., channel] = np.interp(scores, stops, colors[:, channel]).astype(np.uint8)
-    rgba[..., 3] = np.where(mask, np.clip(42 + scores * 1.55, 48, 196), 0).astype(np.uint8)
+        rgba[..., channel] = np.interp(values, stops, colors[:, channel]).astype(np.uint8)
+    return rgba
+
+
+def potential_rgba(scores: np.ndarray, mask: np.ndarray, minimum: int = 0) -> np.ndarray:
+    rgba = _ramp(scores, POTENTIAL_STOPS, POTENTIAL_COLORS)
+    visible = mask & (scores >= minimum)
+    # Fade in over the first few points above the cutoff so the edge isn't a hard cliff.
+    edge = np.clip((scores - minimum) / 6.0, 0, 1) if minimum > 0 else 1.0
+    alpha = np.clip(60 + scores * 1.5, 60, 205) * edge
+    rgba[..., 3] = np.where(visible, alpha, 0).astype(np.uint8)
+    return rgba
+
+
+def cloud_rgba(cloud_percent: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    rgba = _ramp(cloud_percent, CLOUD_STOPS, CLOUD_COLORS)
+    alpha = np.clip(cloud_percent * 2.2, 0, 200)
+    rgba[..., 3] = np.where(mask & (cloud_percent >= 8), alpha, 0).astype(np.uint8)
     return rgba
 
 
@@ -83,12 +113,17 @@ class ForecastTilePyramid:
         zoom: int,
         tile_x: int,
         tile_y: int,
+        layer: str = "potential",
+        minimum: int = 0,
     ) -> tuple[bytes, bool, float]:
         """Return PNG bytes, whether they came from disk cache, and data resolution."""
+        if layer not in LAYERS:
+            raise ValueError(f"Unknown tile layer: {layer}")
+        minimum = quantize_min(minimum) if layer == "potential" else 0
         resolution = resolution_for_zoom(zoom)
         key = cache_key(active, self.engine.provider_key(day), day, minute_offset)
         namespace = self._prepare_namespace(key)
-        path = namespace / str(zoom) / str(tile_x) / f"{tile_y}.png"
+        path = namespace / layer / str(minimum) / str(zoom) / str(tile_x) / f"{tile_y}.png"
         if path.exists():
             return path.read_bytes(), True, resolution
 
@@ -106,11 +141,16 @@ class ForecastTilePyramid:
             # level is close to HRRR's display scale without sending raw 3 km data.
             sample_lat = (np.floor(lat / resolution) + 0.5) * resolution
             sample_lon = (np.floor(lon / resolution) + 0.5) * resolution
-            scores, _ = self.engine.score_field(sample_lat, sample_lon, day, minute_offset)
+            scores, field = self.engine.score_field(sample_lat, sample_lon, day, minute_offset)
+            if layer == "clouds":
+                canvas = np.clip(field.mid_cloud * 0.64 + field.high_cloud * 0.53, 0, 1) * 100
+                rgba = cloud_rgba(canvas.astype(np.float32), mask)
+            else:
+                rgba = potential_rgba(scores, mask, minimum)
         else:
-            scores = np.zeros_like(lat, dtype=np.float32)
+            rgba = np.zeros((*lat.shape, 4), dtype=np.uint8)
 
-        image = Image.fromarray(_rgba(scores, mask), mode="RGBA")
+        image = Image.fromarray(rgba, mode="RGBA")
         output = io.BytesIO()
         image.save(output, format="PNG", optimize=True)
         content = output.getvalue()

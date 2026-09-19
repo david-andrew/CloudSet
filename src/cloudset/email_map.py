@@ -76,10 +76,10 @@ def _draw_marker(image: Image.Image, x: float, y: float) -> None:
 def _draw_map_labels(image: Image.Image) -> None:
     draw = ImageDraw.Draw(image, "RGBA")
     font = ImageFont.load_default(size=11)
-    legend = "FIERY-SKY POTENTIAL"
+    legend = "SUNSET POTENTIAL"
     attribution = "OpenStreetMap · CARTO"
     draw.rounded_rectangle((12, MAP_HEIGHT - 39, 190, MAP_HEIGHT - 10), radius=5, fill=(29, 29, 35, 220))
-    for index, color in enumerate(((241, 176, 63), (233, 93, 45), (167, 45, 89), (91, 43, 126))):
+    for index, color in enumerate(((46, 108, 176), (34, 150, 176), (56, 184, 138), (218, 240, 70))):
         left = 19 + index * 13
         draw.rectangle((left, MAP_HEIGHT - 30, left + 11, MAP_HEIGHT - 19), fill=(*color, 255))
     draw.text((76, MAP_HEIGHT - 33), legend, fill=(255, 255, 255, 255), font=font)

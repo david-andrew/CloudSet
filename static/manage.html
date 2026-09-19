@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11100f">
+  <meta name="robots" content="noindex">
+  <title>Cloudset — Your sunset watches</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="manage-page">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Cloudset home">
+      <span class="brand-mark"><span></span></span>
+      <span>cloudset</span>
+    </a>
+    <div class="topbar-actions">
+      <a class="ghost-button" href="/">Back to the map</a>
+    </div>
+  </header>
+
+  <main class="manage-shell">
+    <section class="manage-card" id="status-card">
+      <span class="dialog-kicker" id="status-kicker">SUNSET WATCH</span>
+      <h1 id="status-title">Checking your link…</h1>
+      <p id="status-text">One moment.</p>
+      <div class="manage-actions" id="status-actions" hidden></div>
+    </section>
+
+    <section id="watch-list" hidden>
+      <div class="section-heading manage-heading"><span>YOUR WATCHES</span><span id="watch-email"></span></div>
+      <div id="watches"></div>
+      <p class="manage-footnote">
+        Want alerts somewhere new? <a href="/">Pick a spot on the map</a> and sign up with the same email.
+        <span id="unsubscribe-all-wrap"> · <button class="link-button" id="unsubscribe-all">Unsubscribe from everything</button></span>
+      </p>
+    </section>
+  </main>
+
+  <template id="watch-template">
+    <form class="watch-card">
+      <div class="watch-head">
+        <div>
+          <strong class="watch-label"></strong>
+          <small class="watch-coords"></small>
+        </div>
+        <span class="tier-pill watch-status"></span>
+      </div>
+      <label>Name for this spot<input name="label" type="text" maxlength="100" placeholder="Harpers Ferry overlook"></label>
+      <div class="watch-row">
+        <label>Latitude<input name="latitude" type="number" step="0.0001" min="-90" max="90" required></label>
+        <label>Longitude<input name="longitude" type="number" step="0.0001" min="-180" max="180" required></label>
+      </div>
+      <fieldset class="notification-timing">
+        <legend>When should we email you?</legend>
+        <label><input type="checkbox" name="notification-time" value="day_before"><span><strong>Evening before</strong><small>An early outlook while tomorrow is still easy to plan.</small></span></label>
+        <label><input type="checkbox" name="notification-time" value="morning"><span><strong>Morning of</strong><small>A refreshed forecast between 8 and noon.</small></span></label>
+        <label><input type="checkbox" name="notification-time" value="final_90"><span><strong>90 minutes before</strong><small>A final call close to sunset.</small></span></label>
+        <label><input type="checkbox" name="notification-time" value="custom" class="custom-toggle"><span><strong>Custom</strong><small>Choose your own lead time.</small></span></label>
+        <div class="custom-time" hidden><input name="custom-hours" type="number" min="0.5" max="36" step="0.5" value="6"><span>hours before sunset</span></div>
+      </fieldset>
+      <label class="threshold-label"><span>Alert me at <strong class="threshold-output">70</strong> or higher</span><input name="threshold" type="range" min="40" max="95" step="5" value="70"></label>
+      <div class="watch-actions">
+        <button class="primary-button" type="submit">Save changes</button>
+        <button class="ghost-button danger" type="button" data-action="remove">Stop watching here</button>
+      </div>
+      <small class="form-note watch-note"></small>
+    </form>
+  </template>
+
+  <script src="/assets/manage.js"></script>
+</body>
+</html>

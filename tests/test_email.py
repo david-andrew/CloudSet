@@ -1,12 +1,12 @@
 import io
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 
 from PIL import Image
 
 import cloudset.main as main
 from cloudset.email_map import MAP_HEIGHT, MAP_WIDTH, render_email_map
-from cloudset.mailer import build_forecast_message, plain_text_content
+from cloudset.mailer import build_confirmation_message, build_downgrade_message, build_forecast_message, countdown_label, plain_text_content
 
 
 def png(color, mode="RGBA"):
@@ -59,14 +59,17 @@ def test_forecast_email_has_location_html_map_and_plain_fallback():
             "aerosol_optical_depth": 0.12,
         },
     }
-    settings = replace(main.settings, smtp_host="", public_url="https://cloudset.example")
+    settings = replace(
+        main.settings, smtp_host="", public_url="https://cloudset.example", secret_key="k" * 40, donate_url="https://ko-fi.com/x"
+    )
     message = build_forecast_message(
         settings,
-        {"email": "watch@example.com", "label": "Brooklyn rooftop"},
+        {"id": 3, "email": "watch@example.com", "label": "Brooklyn rooftop"},
         forecast,
         "Morning sunset outlook",
         png((240, 240, 240, 255)),
         png((230, 230, 230, 255)),
+        now=datetime(2026, 8, 19, 20, 48, tzinfo=timezone.utc),
     )
     plain = plain_text_content(message)
     html = message.get_body(preferencelist=("html",)).get_content()
@@ -79,3 +82,36 @@ def test_forecast_email_has_location_html_map_and_plain_fallback():
     assert 'src="cid:cloudset-map-detail"' in html
     assert 'src="cid:cloudset-map-regional"' in html
     assert sum(part.get_content_type() == "image/png" for part in message.walk()) == 2
+    assert message["Subject"] == "Cloudset: 91% sunset potential in 3 hours near Brooklyn rooftop"
+    assert message["List-Unsubscribe"].startswith("<https://cloudset.example/unsubscribe?token=")
+    assert message["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    assert "https://cloudset.example/manage?token=" in plain
+    assert "https://ko-fi.com/x" in html
+
+
+def test_countdown_phrasing():
+    sunset = "2026-08-19T23:48:00+00:00"
+    at = lambda h, m: datetime(2026, 8, 19, h, m, tzinfo=timezone.utc)  # noqa: E731
+    assert countdown_label(sunset, at(23, 46)) == "right now"
+    assert countdown_label(sunset, at(23, 3)) == "in 45 minutes"
+    assert countdown_label(sunset, at(20, 48)) == "in 3 hours"
+    assert countdown_label(sunset, at(21, 18)) == "in 2.5 hours"
+    assert countdown_label(sunset, datetime(2026, 8, 18, 22, 0, tzinfo=timezone.utc)) == "tomorrow evening"
+
+
+def test_confirmation_and_downgrade_messages():
+    settings = replace(main.settings, smtp_host="", public_url="https://cloudset.example", secret_key="k" * 40)
+    subscriber = {"id": 9, "email": "new@example.com", "label": "Harpers Ferry", "latitude": 39.32, "longitude": -77.74, "threshold": 70}
+    confirmation = build_confirmation_message(settings, subscriber)
+    assert "Confirm your Cloudset sunset watch for Harpers Ferry" == confirmation["Subject"]
+    assert "https://cloudset.example/confirm?token=" in plain_text_content(confirmation)
+    assert confirmation["List-Unsubscribe"] is None
+    forecast = {
+        "geometry": {"type": "Point", "coordinates": [-77.74, 39.32]},
+        "properties": {"score": 41, "tier": "quiet", "sunset_utc": "2026-08-19T23:48:10+00:00", "mid_cloud": 10, "high_cloud": 5, "western_clearance": 30, "aerosol_optical_depth": 0.05},
+    }
+    downgrade = build_downgrade_message(settings, subscriber, forecast, 84, now=datetime(2026, 8, 19, 22, 18, tzinfo=timezone.utc))
+    plain = plain_text_content(downgrade)
+    assert "dropped to 41%" in downgrade["Subject"]
+    assert "Earlier today we said 84%" in plain
+    assert "in 1.5 hours" in plain
