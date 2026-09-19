@@ -42,8 +42,8 @@ function renderWatch(watch) {
   status.textContent = watch.status === 'active' ? 'ACTIVE' : 'AWAITING CONFIRMATION';
   status.classList.toggle('muted', watch.status !== 'active');
   node.querySelector('[name=label]').value = watch.label || '';
-  node.querySelector('[name=latitude]').value = watch.latitude;
-  node.querySelector('[name=longitude]').value = watch.longitude;
+  node.querySelector('[name=latitude]').value = Number(watch.latitude).toFixed(5);
+  node.querySelector('[name=longitude]').value = Number(watch.longitude).toFixed(5);
   node.querySelector('[name=threshold]').value = watch.threshold;
   node.querySelector('.threshold-output').textContent = watch.threshold;
   node.querySelectorAll('[name=notification-time]').forEach((input) => { input.checked = watch.notification_times.includes(input.value); });
