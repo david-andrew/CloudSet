@@ -9,3 +9,4 @@ data/hrrr/
 data/goes/
 data/email_map_cache/
 .env
+.env.*

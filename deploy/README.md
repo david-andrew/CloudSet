@@ -45,11 +45,12 @@ ssh cloudset@137.184.96.145
 ## 2. Install the app
 
 ```bash
-git clone https://github.com/YOUR_USER/cloudset.git ~/cloudset
+git clone https://github.com/david-andrew/CloudSet.git ~/cloudset
 cd ~/cloudset
-cp .env.example .env
-nano .env        # paste the real values (see the checklist below)
-mkdir -p data
+# The app runs as UID 1000 inside the container and must own the data directory.
+mkdir -p data && sudo chown 1000:1000 data
+# From your laptop, copy the prepared production env file (it is git-ignored):
+#   scp .env.production cloudset@137.184.96.145:~/cloudset/.env
 docker compose up -d --build
 ```
 

@@ -4,6 +4,10 @@ Goal: take the working prototype and make it something strangers can use, at a c
 
 Current state (2026-09-18): 25 tests pass. Uncommitted work includes the GOES-East correction, smoke AOD scoring, and UI tweaks. Nothing below assumes those are thrown away.
 
+## Status (2026-09-19)
+
+Phases 0 through 3 are implemented and committed. Remaining: Phase 4 launch steps on the droplet, following `deploy/README.md`. Things-to-watch items are unchanged.
+
 ## Hosting recommendation
 
 **Use one small cloud VM, not the Raspberry Pi.** The Pi would work technically (the app was designed for it), but three things make it a poor public host:
