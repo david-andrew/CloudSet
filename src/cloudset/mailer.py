@@ -205,9 +205,9 @@ def build_forecast_message(
     message.add_alternative(_shell(inner), subtype="html")
     html_part = message.get_payload()[-1]
     if detail_map_png:
-        html_part.add_related(detail_map_png, maintype="image", subtype="png", cid="<cloudset-map-detail>", filename="cloudset-forecast-detail.png")
+        html_part.add_related(detail_map_png, maintype="image", subtype="png", cid="<cloudset-map-detail>", disposition="inline", filename="cloudset-forecast-detail.png")
     if regional_map_png:
-        html_part.add_related(regional_map_png, maintype="image", subtype="png", cid="<cloudset-map-regional>", filename="cloudset-forecast-regional.png")
+        html_part.add_related(regional_map_png, maintype="image", subtype="png", cid="<cloudset-map-regional>", disposition="inline", filename="cloudset-forecast-regional.png")
     return message
 
 
