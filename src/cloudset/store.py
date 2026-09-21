@@ -304,19 +304,6 @@ class Store:
 
     # --- outcomes -----------------------------------------------------------
 
-    def alerted_on(self, forecast_date: str) -> list[dict]:
-        """Active subscriptions that received at least one real alert for this date."""
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT s.*, MAX(n.score) AS alerted_score FROM subscriptions s "
-                "JOIN notification_events n ON n.subscription_id = s.id "
-                "WHERE n.forecast_date=? AND n.result='sent' "
-                "AND n.event_key NOT IN ('downgrade','confirmation','outcome_request') "
-                "AND s.status='active' GROUP BY s.id",
-                (forecast_date,),
-            ).fetchall()
-        return [self._record(row) for row in rows]
-
     def record_outcome(self, subscription_id: int, forecast_date: str, rating: int, predicted_score: float | None, comment: str = "") -> None:
         with self.connect() as conn:
             conn.execute(

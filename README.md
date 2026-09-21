@@ -45,7 +45,7 @@ Key behaviours worth knowing before going public:
 - Every alert carries signed manage and unsubscribe links plus `List-Unsubscribe` headers, so recipients can leave with one click from their mail client.
 - If an alert went out and a later check finds the score below the threshold, a single "the outlook has faded" notice is sent at the next reminder time the person chose.
 - The control room at `/admin` requires the admin token and, in production, is only reachable from the IPs in `CLOUDSET_ADMIN_ALLOW`.
-- About 40 minutes after sunset, anyone who was alerted that day gets a one-tap "how was it?" email. Ratings are visible in the control room and are the ground truth for future calibration.
+- Every alert email ends with five one-tap "how was it?" buttons for that day's sunset. Ratings are visible in the control room and are the ground truth for future calibration.
 - The admin address gets a daily heartbeat plus alerts on sustained HRRR or SMTP failures, and `/api/health` returns 503 when degraded.
 - Leaflet and the web fonts are vendored under `static/vendor`, so the page loads nothing from third-party CDNs.
 - Run one app process. The notification, HRRR, and GOES schedulers live inside it.

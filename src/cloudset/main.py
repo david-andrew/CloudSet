@@ -22,8 +22,6 @@ from .forecast import REGION_BOUNDS, ForecastEngine, default_region
 from .goes import GoesIngestor, GoesObservationProvider, should_refresh_goes
 from .hrrr import HrrrIngestor, HrrrWeatherProvider
 from .mailer import (
-    build_outcome_request,
-    deliver,
     plain_text_content,
     send_admin_alert,
     send_confirmation,
@@ -372,43 +370,10 @@ def dispatch_notifications(force: bool = False) -> dict:
     return {"sent": sent, "skipped": skipped, "errors": errors, "subscribers": len(subscribers)}
 
 
-OUTCOME_DELAY = timedelta(minutes=40)
-OUTCOME_WINDOW = timedelta(hours=3)
-
-
-def dispatch_outcome_requests(now: datetime | None = None) -> dict:
-    """Ask people who were alerted today how the sunset actually was, shortly after it."""
-    now = now or datetime.now(timezone.utc)
-    sent = skipped = 0
-    errors: list[str] = []
-    for offset in (0, -1):
-        forecast_day = now.astimezone(FORECAST_TIMEZONE).date() + timedelta(days=offset)
-        day_key = forecast_day.isoformat()
-        for subscriber in store.alerted_on(day_key):
-            subscription_id = int(subscriber["id"])
-            if store.notification_exists(subscription_id, day_key, "outcome_request"):
-                skipped += 1
-                continue
-            sunset = sunset_utc(forecast_day, float(subscriber["latitude"]), float(subscriber["longitude"]))
-            if not sunset or not (sunset + OUTCOME_DELAY <= now <= sunset + OUTCOME_DELAY + OUTCOME_WINDOW):
-                skipped += 1
-                continue
-            predicted = float(subscriber.get("alerted_score") or 0)
-            try:
-                result = deliver(settings, build_outcome_request(settings, subscriber, day_key, predicted))
-                store.record_notification(subscription_id, day_key, "outcome_request", predicted, result)
-                sent += 1
-            except Exception as exc:
-                log.exception("Outcome request failed")
-                errors.append(f"subscription {subscription_id}: {exc}")
-    return {"sent": sent, "skipped": skipped, "errors": errors}
-
-
 async def scheduler() -> None:
     while True:
         try:
             await asyncio.to_thread(dispatch_notifications)
-            await asyncio.to_thread(dispatch_outcome_requests)
             await asyncio.to_thread(_alert_if_needed)
         except Exception:
             log.exception("Scheduled notification pass failed")

@@ -107,6 +107,40 @@ def _footer_html(settings: Settings, links: dict[str, str]) -> str:
     )
 
 
+RATING_LABELS = {1: "Nothing", 2: "A little colour", 3: "Decent", 4: "Really good", 5: "On fire"}
+
+
+def _rating_base(settings: Settings, subscriber: dict, sunset_utc: str) -> str | None:
+    if subscriber.get("id") is None or not settings.secret_key:
+        return None
+    forecast_date = datetime.fromisoformat(sunset_utc).astimezone(_zone(settings)).date().isoformat()
+    token = make_token(settings.secret_key, "outcome", int(subscriber["id"]), subscriber["email"])
+    return f"{settings.public_url}/rate?token={token}&date={forecast_date}"
+
+
+def _rating_text(base: str | None) -> str:
+    if not base:
+        return ""
+    lines = [f"  {n} · {RATING_LABELS[n]}: {base}&rating={n}" for n in range(1, 6)]
+    return "After sunset, tap one to tell us how it actually was (it helps calibrate the forecast):\n" + "\n".join(lines) + "\n\n"
+
+
+def _rating_html(base: str | None) -> str:
+    if not base:
+        return ""
+    buttons = "".join(
+        f'<a href="{escape(base + "&rating=" + str(n), quote=True)}" style="display:inline-block;margin:3px;padding:9px 11px;background:{"#d95f35" if n >= 4 else "#eee9e0"};'
+        f'color:{"#fff" if n >= 4 else "#3d3833"};text-decoration:none;font-size:12px;font-weight:bold;border-radius:7px">{n} · {RATING_LABELS[n]}</a>'
+        for n in range(1, 6)
+    )
+    return (
+        '<div style="margin-top:22px;padding:16px;background:#f7f3ec;border-radius:8px;text-align:center">'
+        '<div style="font-size:11px;font-weight:bold;letter-spacing:1.2px;color:#8a837c">AFTER SUNSET · HOW WAS IT?</div>'
+        '<p style="margin:6px 0 10px;color:#514c47;font-size:13px">One tap. Your answer helps calibrate the forecast for everyone.</p>'
+        f"{buttons}</div>"
+    )
+
+
 def _shell(inner: str) -> str:
     return (
         '<!doctype html><html><body style="margin:0;background:#f2efe9;color:#292622;font-family:Arial,sans-serif">'
@@ -139,6 +173,7 @@ def build_forecast_message(
     score = round(props["score"])
     interactive_url = _interactive_url(settings, location, latitude, longitude, props["sunset_utc"])
     links = subscription_links(settings, subscriber)
+    rating_base = _rating_base(settings, subscriber, props["sunset_utc"])
     message = EmailMessage()
     message["Subject"] = f"Cloudset: {score}% sunset potential {countdown} near {location}"
     message["From"] = settings.smtp_from
@@ -155,6 +190,7 @@ def build_forecast_message(
         f"Smoke aerosol optical depth: {props['aerosol_optical_depth']:.2f}\n\n"
         "The maps in the HTML version show close-up and regional views of the Cloudset forecast overlay and your marked location.\n\n"
         f"Open your interactive outlook: {interactive_url}\n\n"
+        f"{_rating_text(rating_base)}"
         f"{_footer_text(settings, links)}"
     )
     detail_map_html = (
@@ -200,6 +236,7 @@ def build_forecast_message(
 <td style="padding:12px;background:#f2efe9;border-radius:7px"><span style="font-size:11px;color:#817a73">WESTERN LIGHT PATH</span><br><strong>{props['western_clearance']}% clear</strong></td>
 </tr></table>
 <p style="margin:12px 0 0;padding:12px;background:#f2efe9;border-radius:7px;font-size:13px"><span style="font-size:11px;color:#817a73">SMOKE AEROSOL OPTICAL DEPTH</span><br><strong>{props['aerosol_optical_depth']:.2f} AOD</strong></p>
+{_rating_html(rating_base)}
 {_footer_html(settings, links)}
 </td></tr>"""
     message.add_alternative(_shell(inner), subtype="html")
@@ -226,6 +263,7 @@ def build_downgrade_message(
     score = round(props["score"])
     interactive_url = _interactive_url(settings, location, latitude, longitude, props["sunset_utc"])
     links = subscription_links(settings, subscriber)
+    rating_base = _rating_base(settings, subscriber, props["sunset_utc"])
     message = EmailMessage()
     message["Subject"] = f"Cloudset update: sunset potential near {location} dropped to {score}%"
     message["From"] = settings.smtp_from
@@ -239,6 +277,7 @@ def build_downgrade_message(
         f"Mid/high cloud: {props['mid_cloud']}% / {props['high_cloud']}%\n"
         f"Clear western light path: {props['western_clearance']}%\n\n"
         f"Open your interactive outlook: {interactive_url}\n\n"
+        f"{_rating_text(rating_base)}"
         f"{_footer_text(settings, links)}"
     )
     inner = f"""
@@ -257,6 +296,7 @@ def build_downgrade_message(
 <td style="padding:12px;background:#f2efe9;border-radius:7px"><span style="font-size:11px;color:#817a73">WESTERN LIGHT PATH</span><br><strong>{props['western_clearance']}% clear</strong></td>
 </tr></table>
 <div style="text-align:center;margin-top:22px">{_button(interactive_url, "Open interactive outlook →")}</div>
+{_rating_html(rating_base)}
 {_footer_html(settings, links)}
 </td></tr>"""
     message.add_alternative(_shell(inner), subtype="html")
@@ -285,43 +325,6 @@ def build_confirmation_message(settings: Settings, subscriber: dict) -> EmailMes
 <div style="text-align:center;margin:8px 0 22px">{_button(links['confirm'], "Confirm my sunset watch")}</div>
 <p style="margin:0;color:#8a837c;font-size:12px;line-height:1.5">If you didn't request this, ignore this email and nothing will be sent. Cloudset stores only your email address and the coordinates you chose.</p>
 {_footer_html(settings, {})}
-</td></tr>"""
-    message.add_alternative(_shell(inner), subtype="html")
-    return message
-
-
-def build_outcome_request(settings: Settings, subscriber: dict, forecast_date: str, predicted_score: float) -> EmailMessage:
-    """Short 'how was it?' email with one-tap rating links, sent shortly after sunset."""
-    links = subscription_links(settings, subscriber)
-    token = make_token(settings.secret_key, "outcome", int(subscriber["id"]), subscriber["email"])
-    location = subscriber.get("label") or "your spot"
-    base = f"{settings.public_url}/rate?token={token}&date={forecast_date}"
-    labels = {1: "Nothing", 2: "A little colour", 3: "Decent", 4: "Really good", 5: "On fire"}
-    message = EmailMessage()
-    message["Subject"] = f"How was tonight's sunset near {location}?"
-    message["From"] = settings.smtp_from
-    message["To"] = subscriber["email"]
-    _apply_list_headers(message, links)
-    plain_lines = [f"{n} · {labels[n]}: {base}&rating={n}" for n in range(1, 6)]
-    message.set_content(
-        f"Earlier today Cloudset predicted {round(predicted_score)}% sunset potential near {location}.\n\n"
-        "If you saw it, tap a rating. It takes one click and helps calibrate the forecast:\n\n"
-        + "\n".join(plain_lines)
-        + f"\n\n{_footer_text(settings, links)}"
-    )
-    buttons = "".join(
-        f'<a href="{escape(base + "&rating=" + str(n), quote=True)}" style="display:inline-block;margin:4px;padding:11px 14px;background:{"#d95f35" if n >= 4 else "#eee9e0"};'
-        f'color:{"#fff" if n >= 4 else "#3d3833"};text-decoration:none;font-size:13px;font-weight:bold;border-radius:7px">{n} · {labels[n]}</a>'
-        for n in range(1, 6)
-    )
-    inner = f"""
-<tr><td style="padding:28px 30px 30px">
-<div style="font-size:11px;font-weight:bold;letter-spacing:1.4px;color:#d65f35">SUNSET WATCH · ONE QUESTION</div>
-<h1 style="margin:8px 0 12px;font-size:25px;line-height:1.2">How was tonight's sunset?</h1>
-<p style="margin:0 0 18px;color:#514c47;font-size:14px;line-height:1.5">We predicted <strong>{round(predicted_score)}%</strong> near <strong>{escape(location)}</strong>. If you looked, tap one. Your answer helps calibrate the forecast for everyone.</p>
-<div style="text-align:center">{buttons}</div>
-<p style="margin:18px 0 0;color:#8a837c;font-size:12px">Didn't see it? Just ignore this. We only ask on days we sent you an alert.</p>
-{_footer_html(settings, links)}
 </td></tr>"""
     message.add_alternative(_shell(inner), subtype="html")
     return message

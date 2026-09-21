@@ -91,28 +91,6 @@ def test_downgrade_is_sent_once_after_an_alert(tmp_path, monkeypatch):
     assert main._process_subscriber(store.subscription(quiet_id), final_call, False) == (0, 1, [])
 
 
-def test_outcome_requests_go_out_after_sunset_once(tmp_path, monkeypatch):
-    store = Store(tmp_path / "o.db")
-    monkeypatch.setattr(main, "store", store)
-    monkeypatch.setattr(main, "settings", replace(main.settings, smtp_host="", secret_key="x" * 40))
-    sub_id = store.subscribe("sky@example.com", 40.7128, -74.006, "Home", 70, ["morning"])
-    store.confirm(sub_id)
-    day = "2026-08-19"
-    store.record_notification(sub_id, day, "morning", 83, "sent")
-    # Sunset at NYC on 2026-08-19 is 23:48 UTC. Too early first, then in the window.
-    early = datetime(2026, 8, 19, 23, 50, tzinfo=timezone.utc)
-    assert main.dispatch_outcome_requests(early)["sent"] == 0
-    later = datetime(2026, 8, 20, 0, 45, tzinfo=timezone.utc)
-    assert main.dispatch_outcome_requests(later)["sent"] == 1
-    assert store.notification_exists(sub_id, day, "outcome_request")
-    assert main.dispatch_outcome_requests(later)["sent"] == 0
-    # Someone who only got a downgrade notice is not asked.
-    other = store.subscribe("quiet@example.com", 40.7128, -74.006, "Home", 70, ["morning"])
-    store.confirm(other)
-    store.record_notification(other, day, "downgrade", 30, "sent")
-    assert main.dispatch_outcome_requests(later)["sent"] == 0
-
-
 def test_monitor_flags_stale_hrrr_and_send_errors(monkeypatch):
     m = main.Monitor()
     monkeypatch.setattr(main, "settings", replace(main.settings, forecast_mode="demo"))

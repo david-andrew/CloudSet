@@ -199,7 +199,7 @@ async function loadOutcomes() {
     : '· none yet';
   const rows = document.querySelector('#outcome-rows');
   rows.innerHTML = '';
-  if (!result.outcomes.length) { rows.innerHTML = '<tr><td colspan="7">No ratings yet. Requests go out about 40 minutes after sunset to anyone who was alerted that day.</td></tr>'; return; }
+  if (!result.outcomes.length) { rows.innerHTML = '<tr><td colspan="7">No ratings yet. Every alert email carries five one-tap rating buttons for that day's sunset.</td></tr>'; return; }
   result.outcomes.forEach((o) => {
     const tr = document.createElement('tr');
     tr.appendChild(cell(new Date(o.created_at).toLocaleString()));

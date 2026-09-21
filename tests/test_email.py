@@ -87,6 +87,9 @@ def test_forecast_email_has_location_html_map_and_plain_fallback():
     assert message["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
     assert "https://cloudset.example/manage?token=" in plain
     assert "https://ko-fi.com/x" in html
+    assert "https://cloudset.example/rate?token=" in plain
+    assert plain.count("&rating=") == 5
+    assert "HOW WAS IT?" in html
 
 
 def test_countdown_phrasing():
