@@ -25,9 +25,20 @@ from .solar import sunset_utc
 
 log = logging.getLogger(__name__)
 NOMADS_FILTER = "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl"
+AWS_BUCKET = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 GRID_RESOLUTION = 0.0625
-HRRR_SUBSET_VERSION = "v3-aotk-layer"
+HRRR_SUBSET_VERSION = "v4-aws"
 FIELD_NAMES = {"lcc", "mcc", "hcc", "vis", "prate", "aotk"}
+# (variable, level) pairs as they appear in the .idx files on the AWS mirror.
+IDX_FIELDS = {
+    ("LCDC", "low cloud layer"),
+    ("MCDC", "middle cloud layer"),
+    ("HCDC", "high cloud layer"),
+    ("VIS", "surface"),
+    ("PRATE", "surface"),
+    ("AOTK", "entire atmosphere (considered as a single layer)"),
+}
+USER_AGENT = "cloudset/0.2 (sunset forecast; https://cloudset.dev)"
 
 
 def bounds_for_region(active: list[str]) -> tuple[float, float, float, float]:
@@ -78,6 +89,39 @@ def _download_url(cycle: datetime, lead: int, bounds: tuple[float, float, float,
     return f"{NOMADS_FILTER}?{urllib.parse.urlencode(params)}"
 
 
+def _aws_paths(cycle: datetime, lead: int) -> tuple[str, str]:
+    base = f"{AWS_BUCKET}/hrrr.{cycle:%Y%m%d}/conus/hrrr.t{cycle:%H}z.wrfsfcf{lead:02d}.grib2"
+    return base, base + ".idx"
+
+
+def parse_index(text: str) -> list[tuple[int, int | None]]:
+    """Byte ranges (start, end-exclusive or None for EOF) of the messages we need.
+
+    Each idx line is ``n:offset:d=YYYYMMDDHH:VAR:LEVEL:forecast:``. A message runs
+    from its offset to the next line's offset.
+    """
+    rows = []
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) < 6:
+            continue
+        rows.append((int(parts[1]), parts[3], parts[4]))
+    ranges = []
+    for index, (offset, variable, level) in enumerate(rows):
+        if (variable, level) in IDX_FIELDS:
+            end = rows[index + 1][0] if index + 1 < len(rows) else None
+            ranges.append((offset, end))
+    if len(ranges) != len(IDX_FIELDS):
+        raise RuntimeError(f"HRRR index lists {len(ranges)} of the {len(IDX_FIELDS)} required fields")
+    return ranges
+
+
+def _fetch(url: str, timeout: int = 120, headers: dict | None = None) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
 class HrrrIngestor:
     def __init__(self, root: Path):
         self.root = root
@@ -88,27 +132,55 @@ class HrrrIngestor:
         self._grid_axes: tuple[np.ndarray, np.ndarray] | None = None
         self._lock = threading.Lock()
 
-    def _download(self, cycle: datetime, lead: int, bounds: tuple[float, float, float, float]) -> Path:
-        bounds_key = "_".join(str(int(value)) for value in bounds)
-        path = self.raw_root / f"hrrr_{cycle:%Y%m%d_%H}_f{lead:02d}_{bounds_key}_{HRRR_SUBSET_VERSION}.grib2"
-        if path.exists() and path.stat().st_size > 100_000:
-            return path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        request = urllib.request.Request(_download_url(cycle, lead, bounds), headers={"User-Agent": "cloudset/0.1"})
-        with urllib.request.urlopen(request, timeout=120) as response:
-            content = response.read()
+    @staticmethod
+    def _download_aws(cycle: datetime, lead: int) -> bytes:
+        """Pull only the six needed GRIB messages from the full CONUS file via byte ranges."""
+        grib_url, idx_url = _aws_paths(cycle, lead)
+        ranges = parse_index(_fetch(idx_url, timeout=30).decode())
+        chunks = []
+        for start, end in ranges:
+            span = f"bytes={start}-" if end is None else f"bytes={start}-{end - 1}"
+            chunks.append(_fetch(grib_url, headers={"Range": span}))
+        content = b"".join(chunks)
+        if not content.startswith(b"GRIB"):
+            raise RuntimeError("AWS HRRR mirror returned a non-GRIB byte range")
+        return content
+
+    @staticmethod
+    def _download_nomads(cycle: datetime, lead: int, bounds: tuple[float, float, float, float]) -> bytes:
+        content = _fetch(_download_url(cycle, lead, bounds))
         if not content.startswith(b"GRIB"):
             raise RuntimeError("NOAA returned a non-GRIB response; the requested HRRR cycle may not be ready")
+        return content
+
+    def _download(self, cycle: datetime, lead: int, bounds: tuple[float, float, float, float]) -> tuple[Path, str]:
+        bounds_key = "_".join(str(int(value)) for value in bounds)
+        path = self.raw_root / f"hrrr_{cycle:%Y%m%d_%H}_f{lead:02d}_{bounds_key}_{HRRR_SUBSET_VERSION}.grib2"
+        marker = path.with_suffix(".source")
+        if path.exists() and path.stat().st_size > 100_000:
+            return path, (marker.read_text() if marker.exists() else "NOAA HRRR")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # The AWS Open Data mirror has no rate limit and byte-range reads; NOMADS
+        # is the fallback because it throttles and has frequent outages.
+        try:
+            content = self._download_aws(cycle, lead)
+            source = "NOAA HRRR via AWS"
+        except Exception as exc:
+            log.warning("AWS HRRR mirror failed (%s); falling back to NOMADS", exc)
+            content = self._download_nomads(cycle, lead, bounds)
+            source = "NOAA HRRR via NOMADS"
         temporary = path.with_suffix(".part")
         temporary.write_bytes(content)
         temporary.replace(path)
+        marker.write_text(source)
         self._prune_raw()
-        return path
+        return path, source
 
     def _prune_raw(self, retain: int = 6) -> None:
         files = sorted(self.raw_root.glob("*.grib2"), key=lambda item: item.stat().st_mtime, reverse=True)
         for expired in files[retain:]:
             expired.unlink(missing_ok=True)
+            expired.with_suffix(".source").unlink(missing_ok=True)
 
     def _prepare_target_grid(
         self, source_lat: np.ndarray, source_lon: np.ndarray, bounds: tuple[float, float, float, float]
@@ -118,11 +190,16 @@ class HrrrIngestor:
         lon_axis = np.arange(west + GRID_RESOLUTION / 2, east, GRID_RESOLUTION, dtype=np.float32)
         lon_grid, lat_grid = np.meshgrid(lon_axis, lat_axis)
         scale = math.cos(math.radians((south + north) / 2))
-        source = np.column_stack((source_lat.astype(np.float32), source_lon.astype(np.float32) * scale))
+        keep = np.flatnonzero(
+            (source_lat >= south - 0.2) & (source_lat <= north + 0.2) & (source_lon >= west - 0.2) & (source_lon <= east + 0.2)
+        )
+        if keep.size == 0:
+            raise RuntimeError("HRRR grid does not overlap the forecast region")
+        source = np.column_stack((source_lat[keep].astype(np.float32), source_lon[keep].astype(np.float32) * scale))
         target = np.column_stack((lat_grid.ravel(), lon_grid.ravel() * scale))
         tree = cKDTree(source)
         _, indices = tree.query(target, workers=-1)
-        self._target_indices = indices
+        self._target_indices = keep[indices]
         self._target_shape = lat_grid.shape
         self._grid_axes = lat_axis, lon_axis
 
@@ -175,7 +252,7 @@ class HrrrIngestor:
         target = rounded_target
         cycle, lead = _extended_cycle_for(target, now)
         bounds = bounds_for_region(active)
-        raw = self._download(cycle, lead, bounds)
+        raw, source = self._download(cycle, lead, bounds)
         fields = self._decode(raw, bounds)
         cloud_canvas = fields["mcc"] * 0.64 + fields["hcc"] * 0.53
         grad_y, grad_x = np.gradient(cloud_canvas / 100.0)
@@ -183,7 +260,7 @@ class HrrrIngestor:
         assert self._grid_axes is not None
         lat_axis, lon_axis = self._grid_axes
         metadata = {
-            "source": "NOAA HRRR",
+            "source": source,
             "cycle_utc": cycle.isoformat(),
             "forecast_hour": lead,
             "valid_utc": target.isoformat(),

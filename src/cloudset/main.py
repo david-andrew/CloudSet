@@ -22,7 +22,10 @@ from .forecast import REGION_BOUNDS, ForecastEngine, default_region
 from .goes import GoesIngestor, GoesObservationProvider, should_refresh_goes
 from .hrrr import HrrrIngestor, HrrrWeatherProvider
 from .mailer import (
+    build_outcome_request,
+    deliver,
     plain_text_content,
+    send_admin_alert,
     send_confirmation,
     send_downgrade,
     send_forecast,
@@ -158,6 +161,116 @@ def _limit(limiter: RateLimiter, request: Request) -> None:
         raise HTTPException(status_code=429, detail="Too many requests from this address. Try again in a little while.")
 
 
+# --- monitoring ---------------------------------------------------------------
+
+STALE_HRRR_HOURS = 4
+ALERT_COOLDOWN_HOURS = 6
+
+
+class Monitor:
+    """In-memory record of the last time each background job succeeded or failed.
+
+    Health reporting and the daily heartbeat read from here; alert emails go out
+    when something has been failing long enough to matter, at most once per cooldown.
+    """
+
+    def __init__(self):
+        self.started_at = datetime.now(timezone.utc)
+        self.hrrr_ok_at: datetime | None = None
+        self.hrrr_error: str | None = None
+        self.hrrr_failures = 0
+        self.goes_error: str | None = None
+        self.notify_at: datetime | None = None
+        self.notify_errors: list[str] = []
+        self.last_alert_at: dict[str, datetime] = {}
+        self._lock = threading.Lock()
+
+    def hrrr_success(self) -> None:
+        with self._lock:
+            self.hrrr_ok_at = datetime.now(timezone.utc)
+            self.hrrr_error = None
+            self.hrrr_failures = 0
+
+    def hrrr_failure(self, error: str) -> None:
+        with self._lock:
+            self.hrrr_error = error[:300]
+            self.hrrr_failures += 1
+
+    def notify_pass(self, errors: list[str]) -> None:
+        with self._lock:
+            self.notify_at = datetime.now(timezone.utc)
+            self.notify_errors = errors[:10]
+
+    def hrrr_stale(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now(timezone.utc)
+        reference = self.hrrr_ok_at or self.started_at
+        return now - reference > timedelta(hours=STALE_HRRR_HOURS)
+
+    def problems(self) -> list[str]:
+        items = []
+        mode = engine.provider_metadata(_today())["mode"]
+        if settings.forecast_mode in {"auto", "live"} and mode != "live":
+            items.append("Forecast is on the demo fallback (no live HRRR snapshot for today)")
+        if settings.forecast_mode in {"auto", "live"} and self.hrrr_stale():
+            items.append(f"HRRR has not refreshed in over {STALE_HRRR_HOURS} hours" + (f": {self.hrrr_error}" if self.hrrr_error else ""))
+        if self.notify_errors:
+            items.append(f"Last notification pass had {len(self.notify_errors)} error(s): {self.notify_errors[0]}")
+        return items
+
+    def should_alert(self, key: str) -> bool:
+        with self._lock:
+            last = self.last_alert_at.get(key)
+            if last and datetime.now(timezone.utc) - last < timedelta(hours=ALERT_COOLDOWN_HOURS):
+                return False
+            self.last_alert_at[key] = datetime.now(timezone.utc)
+            return True
+
+
+monitor = Monitor()
+
+
+def _alert_if_needed() -> None:
+    """Email the admin about a sustained failure, at most once per cooldown per kind."""
+    if settings.forecast_mode in {"auto", "live"} and monitor.hrrr_failures >= 3 and monitor.should_alert("hrrr"):
+        send_admin_alert(
+            settings,
+            "HRRR ingestion is failing",
+            f"{monitor.hrrr_failures} consecutive hourly refreshes have failed.\nLast error: {monitor.hrrr_error}\n"
+            f"Last success: {monitor.hrrr_ok_at.isoformat() if monitor.hrrr_ok_at else 'never since start'}\n\n"
+            "Alerts pause while the forecast is on the demo fallback. Check `docker compose logs app` on the droplet.",
+        )
+    if monitor.notify_errors and monitor.should_alert("notify"):
+        send_admin_alert(
+            settings,
+            "Notification sends are failing",
+            "Errors from the latest pass:\n" + "\n".join(monitor.notify_errors) + "\n\nIf these are SMTP timeouts, see the deploy README about outbound ports.",
+        )
+
+
+def heartbeat_body() -> str:
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    sends = store.sends_since(since)
+    counts = store.status_counts()
+    outcomes = store.outcome_summary()
+    meta = engine.provider_metadata(_today())
+    problems = monitor.problems()
+    lines = [
+        f"Cloudset daily heartbeat · {datetime.now(FORECAST_TIMEZONE):%A %B %-d, %-I:%M %p %Z}",
+        "",
+        "STATUS: " + ("all clear" if not problems else "attention needed"),
+        *[f"  ! {item}" for item in problems],
+        "",
+        f"Forecast: {meta.get('model_run')} (mode {meta.get('mode')})",
+        f"HRRR last success: {monitor.hrrr_ok_at.isoformat(timespec='minutes') if monitor.hrrr_ok_at else 'none since start'}",
+        f"Emails last 24h: {sends.get('sent', 0)} sent, {sends.get('logged', 0)} logged" + (f", other: {sum(v for k, v in sends.items() if k not in ('sent', 'logged'))}" if any(k not in ('sent', 'logged') for k in sends) else ""),
+        f"Subscribers: {counts['active']} active, {counts['pending']} pending, {counts['unsubscribed']} unsubscribed",
+        f"Outcome ratings: {outcomes['count']} total" + (f", average {outcomes['average_rating']:.1f}/5 against a mean predicted score of {outcomes['average_predicted_score']:.0f}" if outcomes['count'] else ""),
+        "",
+        f"Control room: {settings.public_url}/admin",
+    ]
+    return "\n".join(lines)
+
+
 # --- notifications -----------------------------------------------------------
 
 EVENT_LABELS = {
@@ -255,16 +368,68 @@ def dispatch_notifications(force: bool = False) -> dict:
             sent += result[0]
             skipped += result[1]
             errors.extend(result[2])
+    monitor.notify_pass(errors)
     return {"sent": sent, "skipped": skipped, "errors": errors, "subscribers": len(subscribers)}
+
+
+OUTCOME_DELAY = timedelta(minutes=40)
+OUTCOME_WINDOW = timedelta(hours=3)
+
+
+def dispatch_outcome_requests(now: datetime | None = None) -> dict:
+    """Ask people who were alerted today how the sunset actually was, shortly after it."""
+    now = now or datetime.now(timezone.utc)
+    sent = skipped = 0
+    errors: list[str] = []
+    for offset in (0, -1):
+        forecast_day = now.astimezone(FORECAST_TIMEZONE).date() + timedelta(days=offset)
+        day_key = forecast_day.isoformat()
+        for subscriber in store.alerted_on(day_key):
+            subscription_id = int(subscriber["id"])
+            if store.notification_exists(subscription_id, day_key, "outcome_request"):
+                skipped += 1
+                continue
+            sunset = sunset_utc(forecast_day, float(subscriber["latitude"]), float(subscriber["longitude"]))
+            if not sunset or not (sunset + OUTCOME_DELAY <= now <= sunset + OUTCOME_DELAY + OUTCOME_WINDOW):
+                skipped += 1
+                continue
+            predicted = float(subscriber.get("alerted_score") or 0)
+            try:
+                result = deliver(settings, build_outcome_request(settings, subscriber, day_key, predicted))
+                store.record_notification(subscription_id, day_key, "outcome_request", predicted, result)
+                sent += 1
+            except Exception as exc:
+                log.exception("Outcome request failed")
+                errors.append(f"subscription {subscription_id}: {exc}")
+    return {"sent": sent, "skipped": skipped, "errors": errors}
 
 
 async def scheduler() -> None:
     while True:
         try:
             await asyncio.to_thread(dispatch_notifications)
+            await asyncio.to_thread(dispatch_outcome_requests)
+            await asyncio.to_thread(_alert_if_needed)
         except Exception:
             log.exception("Scheduled notification pass failed")
         await asyncio.sleep(15 * 60)
+
+
+HEARTBEAT_HOUR = 7
+
+
+async def heartbeat_scheduler() -> None:
+    """One summary email a day so silence never means 'probably fine'."""
+    while True:
+        local = datetime.now(FORECAST_TIMEZONE)
+        target = local.replace(hour=HEARTBEAT_HOUR, minute=30, second=0, microsecond=0)
+        if target <= local:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - local).total_seconds())
+        try:
+            await asyncio.to_thread(send_admin_alert, settings, "Daily heartbeat", heartbeat_body())
+        except Exception:
+            log.exception("Heartbeat email failed")
 
 
 async def hrrr_scheduler() -> None:
@@ -276,8 +441,10 @@ async def hrrr_scheduler() -> None:
             results = await asyncio.to_thread(hrrr_ingestor.refresh, _active_region(), _today())
             live_provider.invalidate()
             _cache.clear()
+            monitor.hrrr_success()
             log.info("HRRR refresh complete: %s", results)
-        except Exception:
+        except Exception as exc:
+            monitor.hrrr_failure(f"{type(exc).__name__}: {exc}")
             log.exception("HRRR refresh failed; demo fallback remains active")
         await asyncio.sleep(60 * 60)
 
@@ -293,7 +460,8 @@ async def goes_scheduler() -> None:
                 live_provider.invalidate()
                 _cache.clear()
                 log.info("GOES-East correction refresh complete: %s", result)
-        except Exception:
+        except Exception as exc:
+            monitor.goes_error = f"{type(exc).__name__}: {exc}"[:300]
             log.exception("GOES-East correction refresh failed; HRRR remains active")
         await asyncio.sleep(10 * 60)
 
@@ -301,6 +469,8 @@ async def goes_scheduler() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     tasks = [asyncio.create_task(scheduler())]
+    if settings.admin_email:
+        tasks.append(asyncio.create_task(heartbeat_scheduler()))
     if settings.forecast_mode in {"auto", "live"}:
         tasks.extend((asyncio.create_task(hrrr_scheduler()), asyncio.create_task(goes_scheduler())))
     yield
@@ -431,6 +601,11 @@ def manage_ui() -> FileResponse:
     return FileResponse(settings.root / "static" / "manage.html")
 
 
+@app.get("/rate", include_in_schema=False)
+def rate_ui() -> FileResponse:
+    return FileResponse(settings.root / "static" / "rate.html")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> FileResponse:
     return FileResponse(settings.root / "static" / "favicon.svg", media_type="image/svg+xml")
@@ -438,15 +613,25 @@ def favicon() -> FileResponse:
 
 @app.get("/robots.txt", include_in_schema=False)
 def robots() -> Response:
-    return Response("User-agent: *\nDisallow: /admin\nDisallow: /manage\nDisallow: /confirm\nDisallow: /unsubscribe\nDisallow: /api/\n", media_type="text/plain")
+    return Response("User-agent: *\nDisallow: /admin\nDisallow: /manage\nDisallow: /confirm\nDisallow: /unsubscribe\nDisallow: /rate\nDisallow: /api/\n", media_type="text/plain")
 
 
 # --- public API ---------------------------------------------------------------
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok", "mode": engine.provider_metadata(_today())["mode"], "configured_mode": settings.forecast_mode, "version": app.version}
+def health(response: Response) -> dict:
+    problems = monitor.problems()
+    if problems:
+        response.status_code = 503
+    return {
+        "status": "degraded" if problems else "ok",
+        "problems": problems,
+        "mode": engine.provider_metadata(_today())["mode"],
+        "configured_mode": settings.forecast_mode,
+        "hrrr_last_success": monitor.hrrr_ok_at.isoformat() if monitor.hrrr_ok_at else None,
+        "version": app.version,
+    }
 
 
 @app.get("/api/config")
@@ -662,6 +847,28 @@ def delete_watch(subscription_id: int, request: Request, token: str = Query(min_
     return {"ok": True}
 
 
+# --- outcomes -----------------------------------------------------------------
+
+
+class OutcomeBody(BaseModel):
+    token: str = Field(min_length=10, max_length=600)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=500)
+
+
+@app.post("/api/outcome")
+def record_outcome(body: OutcomeBody, request: Request) -> dict:
+    _limit(manage_limiter, request)
+    record = _resolve(body.token, "outcome")
+    alerts = store.alerts_for_date(int(record["id"]), body.date)
+    if not alerts:
+        raise HTTPException(status_code=404, detail="We didn't send you an alert for that day, so there's nothing to rate.")
+    predicted = max(float(a["score"]) for a in alerts)
+    store.record_outcome(int(record["id"]), body.date, body.rating, predicted, body.comment.strip())
+    return {"ok": True, "rating": body.rating, "predicted_score": predicted, "label": record["label"], "date": body.date}
+
+
 # --- admin --------------------------------------------------------------------
 
 
@@ -775,6 +982,17 @@ def admin_notifications(limit: int = Query(default=50, ge=1, le=500)) -> dict:
     return {"notifications": store.recent_notifications(limit)}
 
 
+@app.get("/api/admin/outcomes", dependencies=[Depends(require_admin)])
+def admin_outcomes(limit: int = Query(default=200, ge=1, le=1000)) -> dict:
+    return {"summary": store.outcome_summary(), "outcomes": store.outcomes(limit)}
+
+
+@app.post("/api/admin/heartbeat", dependencies=[Depends(require_admin)])
+def admin_heartbeat() -> dict:
+    body = heartbeat_body()
+    return {"ok": True, "delivery": send_admin_alert(settings, "Daily heartbeat (manual)", body), "body": body}
+
+
 @app.get("/api/admin/status", dependencies=[Depends(require_admin)])
 def admin_status() -> dict:
     today = _today()
@@ -796,6 +1014,9 @@ def admin_status() -> dict:
         "smtp_configured": bool(settings.smtp_host),
         "admin_auth": bool(settings.admin_token),
         "warnings": validate_settings(settings),
+        "problems": monitor.problems(),
+        "hrrr_last_success": monitor.hrrr_ok_at.isoformat() if monitor.hrrr_ok_at else None,
+        "admin_email": settings.admin_email,
         "last_run": store.last_run(),
     }
 

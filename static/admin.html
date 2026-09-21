@@ -7,7 +7,8 @@
   <title>Cloudset Control Room</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <meta name="robots" content="noindex">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/assets/vendor/fonts/fonts.css">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body class="admin-page">
@@ -24,6 +25,7 @@
         <button data-scroll="delivery"><span>◇</span>Delivery</button>
         <button data-scroll="subscribers"><span>☺</span>Subscribers</button>
         <button data-scroll="log"><span>≡</span>Send log</button>
+        <button data-scroll="outcomes"><span>★</span>Outcomes</button>
       </nav>
       <div class="admin-help"><span>?</span><p><strong>Forecast footprint</strong>The amber cells are scored. The dashed boundary shows the extra upstream area weather providers need.</p></div>
     </aside>
@@ -32,6 +34,7 @@
         <div><span class="eyebrow">FORECAST CONFIGURATION</span><h1>Shape the search area</h1><p>Paint the cells Cloudset should evaluate. All editing stays in your browser until you save.</p></div>
         <div class="admin-actions"><button class="ghost-button dark" id="reset-region">Reset East Coast</button><button class="primary-button" id="save-region">Save <span id="unsaved-count"></span></button></div>
       </div>
+      <div class="admin-problems" id="problems" hidden></div>
       <div class="admin-warning" id="config-warnings" hidden></div>
       <div class="admin-map-card">
         <div class="paint-toolbar">
@@ -66,6 +69,7 @@
           <input id="test-email-address" type="email" placeholder="you@example.com" aria-label="Test email recipient">
           <button class="primary-button" id="send-test-email">Send test email</button>
           <button class="ghost-button dark" id="notification-pass">Run due-alert pass</button>
+          <button class="ghost-button dark" id="send-heartbeat">Send heartbeat now</button>
         </div>
         <pre id="email-preview" hidden></pre>
       </section>
@@ -74,6 +78,13 @@
         <table class="admin-table">
           <thead><tr><th>EMAIL</th><th>SPOT</th><th>THRESHOLD</th><th>TIMES</th><th>STATUS</th><th>CREATED</th><th></th></tr></thead>
           <tbody id="subscriber-rows"><tr><td colspan="7">Loading…</td></tr></tbody>
+        </table>
+      </section>
+      <section class="admin-table-card" id="outcomes">
+        <h2>Outcomes <small id="outcome-summary"></small></h2>
+        <table class="admin-table">
+          <thead><tr><th>WHEN</th><th>EMAIL</th><th>SPOT</th><th>DATE</th><th>PREDICTED</th><th>RATING</th><th>NOTE</th></tr></thead>
+          <tbody id="outcome-rows"><tr><td colspan="7">Loading…</td></tr></tbody>
         </table>
       </section>
       <section class="admin-table-card" id="log">
@@ -86,7 +97,7 @@
     </section>
   </main>
   <div class="toast" id="toast"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/assets/vendor/leaflet/leaflet.js"></script>
   <script src="/assets/admin.js"></script>
 </body>
 </html>

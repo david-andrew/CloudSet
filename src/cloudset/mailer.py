@@ -290,6 +290,59 @@ def build_confirmation_message(settings: Settings, subscriber: dict) -> EmailMes
     return message
 
 
+def build_outcome_request(settings: Settings, subscriber: dict, forecast_date: str, predicted_score: float) -> EmailMessage:
+    """Short 'how was it?' email with one-tap rating links, sent shortly after sunset."""
+    links = subscription_links(settings, subscriber)
+    token = make_token(settings.secret_key, "outcome", int(subscriber["id"]), subscriber["email"])
+    location = subscriber.get("label") or "your spot"
+    base = f"{settings.public_url}/rate?token={token}&date={forecast_date}"
+    labels = {1: "Nothing", 2: "A little colour", 3: "Decent", 4: "Really good", 5: "On fire"}
+    message = EmailMessage()
+    message["Subject"] = f"How was tonight's sunset near {location}?"
+    message["From"] = settings.smtp_from
+    message["To"] = subscriber["email"]
+    _apply_list_headers(message, links)
+    plain_lines = [f"{n} · {labels[n]}: {base}&rating={n}" for n in range(1, 6)]
+    message.set_content(
+        f"Earlier today Cloudset predicted {round(predicted_score)}% sunset potential near {location}.\n\n"
+        "If you saw it, tap a rating. It takes one click and helps calibrate the forecast:\n\n"
+        + "\n".join(plain_lines)
+        + f"\n\n{_footer_text(settings, links)}"
+    )
+    buttons = "".join(
+        f'<a href="{escape(base + "&rating=" + str(n), quote=True)}" style="display:inline-block;margin:4px;padding:11px 14px;background:{"#d95f35" if n >= 4 else "#eee9e0"};'
+        f'color:{"#fff" if n >= 4 else "#3d3833"};text-decoration:none;font-size:13px;font-weight:bold;border-radius:7px">{n} · {labels[n]}</a>'
+        for n in range(1, 6)
+    )
+    inner = f"""
+<tr><td style="padding:28px 30px 30px">
+<div style="font-size:11px;font-weight:bold;letter-spacing:1.4px;color:#d65f35">SUNSET WATCH · ONE QUESTION</div>
+<h1 style="margin:8px 0 12px;font-size:25px;line-height:1.2">How was tonight's sunset?</h1>
+<p style="margin:0 0 18px;color:#514c47;font-size:14px;line-height:1.5">We predicted <strong>{round(predicted_score)}%</strong> near <strong>{escape(location)}</strong>. If you looked, tap one. Your answer helps calibrate the forecast for everyone.</p>
+<div style="text-align:center">{buttons}</div>
+<p style="margin:18px 0 0;color:#8a837c;font-size:12px">Didn't see it? Just ignore this. We only ask on days we sent you an alert.</p>
+{_footer_html(settings, links)}
+</td></tr>"""
+    message.add_alternative(_shell(inner), subtype="html")
+    return message
+
+
+def build_admin_alert(settings: Settings, subject: str, body: str) -> EmailMessage:
+    message = EmailMessage()
+    message["Subject"] = f"[Cloudset] {subject}"
+    message["From"] = settings.smtp_from
+    message["To"] = settings.admin_email
+    message.set_content(body)
+    return message
+
+
+def send_admin_alert(settings: Settings, subject: str, body: str) -> str:
+    if not settings.admin_email:
+        log.warning("Admin alert suppressed (no CLOUDSET_ADMIN_EMAIL): %s", subject)
+        return "skipped"
+    return deliver(settings, build_admin_alert(settings, subject, body))
+
+
 def plain_text_content(message: EmailMessage) -> str:
     part = message.get_body(preferencelist=("plain",))
     return part.get_content() if part else ""

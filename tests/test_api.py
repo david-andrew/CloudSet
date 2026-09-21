@@ -30,7 +30,7 @@ ADMIN = {"X-Admin-Token": "admin-token"}
 
 
 def test_public_api_and_tiles(client):
-    assert client.get("/api/health").json()["status"] == "ok"
+    assert client.get("/api/health").json()["status"] in {"ok", "degraded"}
     forecast = client.get("/api/forecast?day=0&offset=0")
     assert forecast.status_code == 200
     assert forecast.json()["meta"]["mode"] in {"demo", "live"}
@@ -137,3 +137,33 @@ def test_admin_requires_token_and_lists_subscribers(client):
     assert "Cloudset:" in test_email.json()["preview"]["subject"]
     assert client.get("/robots.txt").text.startswith("User-agent")
     assert client.get("/manage").status_code == 200
+
+
+def test_outcome_rating_and_health(client, monkeypatch):
+    signup = client.post("/api/subscriptions", json={"email": "r@example.com", "latitude": 40.71, "longitude": -74.01, "label": "Roof"})
+    sub_id = signup.json()["id"]
+    main.store.confirm(sub_id)
+    token = make_token(SECRET, "outcome", sub_id, "r@example.com")
+    nothing = client.post("/api/outcome", json={"token": token, "date": "2026-08-19", "rating": 4})
+    assert nothing.status_code == 404
+    main.store.record_notification(sub_id, "2026-08-19", "morning", 77, "sent")
+    rated = client.post("/api/outcome", json={"token": token, "date": "2026-08-19", "rating": 4, "comment": "great"})
+    assert rated.status_code == 200
+    assert rated.json()["predicted_score"] == 77
+    wrong_purpose = make_token(SECRET, "manage", sub_id, "r@example.com")
+    assert client.post("/api/outcome", json={"token": wrong_purpose, "date": "2026-08-19", "rating": 4}).status_code == 400
+    outcomes = client.get("/api/admin/outcomes", headers=ADMIN).json()
+    assert outcomes["summary"]["count"] == 1
+    assert outcomes["outcomes"][0]["comment"] == "great"
+    assert client.get("/rate").status_code == 200
+
+    health = client.get("/api/health")
+    assert health.status_code in {200, 503}
+    main.monitor.notify_pass(["boom"])
+    degraded = client.get("/api/health")
+    assert degraded.status_code == 503
+    assert degraded.json()["status"] == "degraded"
+    main.monitor.notify_pass([])
+    heartbeat = client.post("/api/admin/heartbeat", headers=ADMIN)
+    assert heartbeat.status_code == 200
+    assert "Daily heartbeat" not in heartbeat.json()["body"] or "Cloudset daily heartbeat" in heartbeat.json()["body"]

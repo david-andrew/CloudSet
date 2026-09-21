@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS notification_events (
   PRIMARY KEY(subscription_id, forecast_date, event_key),
   FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
 );
+CREATE TABLE IF NOT EXISTS outcomes (
+  subscription_id INTEGER NOT NULL,
+  forecast_date TEXT NOT NULL,
+  rating INTEGER NOT NULL,
+  predicted_score REAL,
+  comment TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(subscription_id, forecast_date),
+  FOREIGN KEY(subscription_id) REFERENCES subscriptions(id)
+);
 """
 
 STATUSES = {"pending", "active", "unsubscribed"}
@@ -291,3 +301,48 @@ class Store:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # --- outcomes -----------------------------------------------------------
+
+    def alerted_on(self, forecast_date: str) -> list[dict]:
+        """Active subscriptions that received at least one real alert for this date."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT s.*, MAX(n.score) AS alerted_score FROM subscriptions s "
+                "JOIN notification_events n ON n.subscription_id = s.id "
+                "WHERE n.forecast_date=? AND n.result='sent' "
+                "AND n.event_key NOT IN ('downgrade','confirmation','outcome_request') "
+                "AND s.status='active' GROUP BY s.id",
+                (forecast_date,),
+            ).fetchall()
+        return [self._record(row) for row in rows]
+
+    def record_outcome(self, subscription_id: int, forecast_date: str, rating: int, predicted_score: float | None, comment: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO outcomes(subscription_id, forecast_date, rating, predicted_score, comment, created_at) VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(subscription_id, forecast_date) DO UPDATE SET rating=excluded.rating, comment=excluded.comment, created_at=excluded.created_at",
+                (subscription_id, forecast_date, rating, predicted_score, comment[:500], _now()),
+            )
+
+    def outcomes(self, limit: int = 200) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT o.*, s.email, s.label, s.latitude, s.longitude FROM outcomes o "
+                "LEFT JOIN subscriptions s ON s.id = o.subscription_id ORDER BY o.created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def outcome_summary(self) -> dict:
+        with self.connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n, AVG(rating) AS avg_rating, AVG(predicted_score) AS avg_score FROM outcomes").fetchone()
+            by_rating = {int(r["rating"]): int(r["n"]) for r in conn.execute("SELECT rating, COUNT(*) AS n FROM outcomes GROUP BY rating")}
+        return {"count": int(row["n"]), "average_rating": row["avg_rating"], "average_predicted_score": row["avg_score"], "by_rating": by_rating}
+
+    def sends_since(self, since_iso: str) -> dict:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT result, COUNT(*) AS n FROM notification_events WHERE sent_at >= ? GROUP BY result", (since_iso,)
+            ).fetchall()
+        return {row["result"]: int(row["n"]) for row in rows}

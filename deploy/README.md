@@ -79,6 +79,7 @@ curl https://cloudset.dev/api/health
 | `CLOUDSET_PUBLIC_URL` | `https://cloudset.dev` |
 | `CLOUDSET_ADMIN_TOKEN` | `openssl rand -hex 24` |
 | `CLOUDSET_SECRET_KEY` | `openssl rand -hex 24`, never change it once emails have gone out |
+| `CLOUDSET_ADMIN_EMAIL` | your address. Gets a daily 7:30 AM heartbeat and alerts when HRRR or sending fails |
 | `CLOUDSET_ADMIN_ALLOW` | your home IP, e.g. `73.132.82.112/32` (find it with `curl -4 ifconfig.me`) |
 | `CLOUDSET_FORECAST_MODE` | `auto` |
 | `CLOUDSET_SMTP_PORT` | `2587`. DigitalOcean blocks the usual 587 and 465; Resend's 2587 works |
@@ -96,7 +97,7 @@ URL isn't https. The reason is printed in `docker compose logs app`.
    asked, and send a test email to yourself. Check it lands in the inbox with
    both maps.
 3. Sign up for a watch with your own address and click the confirmation link.
-4. Add `https://cloudset.dev/api/health` to UptimeRobot.
+4. Add `https://cloudset.dev/api/health` to UptimeRobot. It returns 503 when the forecast is stuck on the demo fallback, HRRR hasn't refreshed in 4 hours, or the last send pass had errors, so a plain HTTP monitor is enough.
 5. Install the backup cron:
 
    ```bash
@@ -158,6 +159,9 @@ for p in 587 2587 465 2465; do timeout 5 bash -c "</dev/tcp/smtp.resend.com/$p" 
 
 and set `CLOUDSET_SMTP_PORT` to an open one (2587 for STARTTLS), then
 `docker compose up -d app`.
+
+The daily heartbeat email didn't arrive: it goes out at 07:30 Eastern to
+`CLOUDSET_ADMIN_EMAIL`. Use "Send heartbeat now" in the control room to test.
 
 ## 6. Sizing notes
 

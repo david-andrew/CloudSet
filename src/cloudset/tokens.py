@@ -13,7 +13,7 @@ import hashlib
 import hmac
 from dataclasses import dataclass
 
-PURPOSES = {"confirm", "manage", "unsubscribe"}
+PURPOSES = {"confirm", "manage", "unsubscribe", "outcome"}
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,8 +11,8 @@
   <meta property="og:type" content="website">
   <meta property="og:image" content="/assets/og.png">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://unpkg.com">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/assets/vendor/fonts/fonts.css">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body class="public-page">
@@ -37,7 +37,10 @@
         <span class="eyebrow">YOUR FORECAST</span>
         <div class="location-row">
           <div class="location-text"><strong id="location-name">New York City</strong><small id="coordinates">40.713° N · 74.006° W</small></div>
-          <button class="round-icon" id="locate-button" title="Use my location" aria-label="Use my current location">⌖</button>
+          <div class="location-actions">
+            <button class="round-icon" id="share-button" title="Copy a link to this forecast" aria-label="Copy a link to this forecast">⇪</button>
+            <button class="round-icon" id="locate-button" title="Use my location" aria-label="Use my current location">⌖</button>
+          </div>
         </div>
         <form class="search-form" id="search-form" role="search" autocomplete="off">
           <input id="search-input" type="search" placeholder="Search a town, park, or beach…" aria-label="Search for a place" maxlength="120">
@@ -180,12 +183,12 @@
       <button class="dialog-close" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
       <span class="dialog-kicker">PRIVACY</span>
       <h2>What we keep</h2>
-      <p>If you sign up for alerts, Cloudset stores your email address, the coordinates and name you chose, your alert settings, and a log of which alerts were sent. Nothing else. There are no accounts, no tracking scripts, and no ads.</p>
+      <p>If you sign up for alerts, Cloudset stores your email address, the coordinates and name you chose, your alert settings, and a log of which alerts were sent. Nothing else. There are no accounts, no tracking scripts, no ads, and no third-party fonts or scripts. Map imagery and place search come from the providers listed under How it works.</p>
       <p>Your last map position and overlay settings are saved in your own browser so the map opens where you left it. Unsubscribing removes you from all future emails immediately; you can also ask for your record to be deleted by replying to any alert.</p>
     </article>
   </dialog>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/assets/vendor/leaflet/leaflet.js"></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

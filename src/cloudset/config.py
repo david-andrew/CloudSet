@@ -18,6 +18,7 @@ class Settings:
     port: int
     public_url: str
     admin_token: str
+    admin_email: str
     secret_key: str
     environment: str
     forecast_mode: str
@@ -55,6 +56,7 @@ def get_settings() -> Settings:
         port=port,
         public_url=os.getenv("CLOUDSET_PUBLIC_URL", f"http://127.0.0.1:{port}").rstrip("/"),
         admin_token=os.getenv("CLOUDSET_ADMIN_TOKEN", ""),
+        admin_email=os.getenv("CLOUDSET_ADMIN_EMAIL", ""),
         secret_key=os.getenv("CLOUDSET_SECRET_KEY", ""),
         environment=os.getenv("CLOUDSET_ENV", "development").lower(),
         forecast_mode=os.getenv("CLOUDSET_FORECAST_MODE", "demo").lower(),
@@ -86,6 +88,8 @@ def validate_settings(settings: Settings) -> list[str]:
             problems.append("CLOUDSET_SMTP_HOST is empty; confirmations and alerts would only be logged")
         if "example.com" in settings.smtp_from:
             problems.append("CLOUDSET_SMTP_FROM still uses the example sender address")
+        if not settings.admin_email:
+            problems.append("CLOUDSET_ADMIN_EMAIL is empty; nobody will hear about failed ingests or sends")
         if settings.forecast_mode not in {"auto", "live"}:
             problems.append("CLOUDSET_FORECAST_MODE should be auto or live in production")
     return problems

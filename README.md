@@ -9,7 +9,7 @@ This repository is a working vertical slice:
 - vectorized scoring, solar geometry, SQLite persistence, SMTP delivery, and a 15-minute notification scheduler;
 - live NOAA HRRR cloud/smoke snapshots, near-sunset GOES-East infrared cloud-motion correction, and deterministic demo fallback when live data is unavailable.
 
-With `CLOUDSET_FORECAST_MODE=auto`, the service downloads narrowly cropped NOAA HRRR low/mid/high cloud, visibility, precipitation, and smoke aerosol optical depth fields for tonight and tomorrow. It normalizes each valid time to a compact 0.0625° NumPy snapshot and refreshes hourly. Moderate smoke AOD receives only a bounded color bonus; dense smoke/haze incurs an extinction penalty. During the final hours before sunset, two small NASA GIBS GOES-East Band 13 frames provide an observed cloud field and motion correction at the same resolution. If the upstream model cycle is unavailable, the UI and API explicitly switch to the deterministic demo fallback rather than presenting stale/demo data as live.
+With `CLOUDSET_FORECAST_MODE=auto`, the service pulls the six needed NOAA HRRR fields by byte range from the AWS Open Data mirror (falling back to NOMADS) low/mid/high cloud, visibility, precipitation, and smoke aerosol optical depth fields for tonight and tomorrow. It normalizes each valid time to a compact 0.0625° NumPy snapshot and refreshes hourly. Moderate smoke AOD receives only a bounded color bonus; dense smoke/haze incurs an extinction penalty. During the final hours before sunset, two small NASA GIBS GOES-East Band 13 frames provide an observed cloud field and motion correction at the same resolution. If the upstream model cycle is unavailable, the UI and API explicitly switch to the deterministic demo fallback rather than presenting stale/demo data as live.
 
 ## Run locally
 
@@ -45,6 +45,9 @@ Key behaviours worth knowing before going public:
 - Every alert carries signed manage and unsubscribe links plus `List-Unsubscribe` headers, so recipients can leave with one click from their mail client.
 - If an alert went out and a later check finds the score below the threshold, a single "the outlook has faded" notice is sent at the next reminder time the person chose.
 - The control room at `/admin` requires the admin token and, in production, is only reachable from the IPs in `CLOUDSET_ADMIN_ALLOW`.
+- About 40 minutes after sunset, anyone who was alerted that day gets a one-tap "how was it?" email. Ratings are visible in the control room and are the ground truth for future calibration.
+- The admin address gets a daily heartbeat plus alerts on sustained HRRR or SMTP failures, and `/api/health` returns 503 when degraded.
+- Leaflet and the web fonts are vendored under `static/vendor`, so the page loads nothing from third-party CDNs.
 - Run one app process. The notification, HRRR, and GOES schedulers live inside it.
 
 ## Next implementation milestone

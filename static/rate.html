@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11100f">
+  <meta name="robots" content="noindex">
+  <title>Cloudset — How was the sunset?</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="manage-page">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Cloudset home"><span class="brand-mark"><span></span></span><span>cloudset</span></a>
+    <div class="topbar-actions"><a class="ghost-button" href="/">Back to the map</a></div>
+  </header>
+  <main class="manage-shell">
+    <section class="manage-card">
+      <span class="dialog-kicker" id="kicker">SUNSET WATCH</span>
+      <h1 id="title">Saving your rating…</h1>
+      <p id="text">One moment.</p>
+      <div class="rating-row" id="rating-row" hidden></div>
+      <form id="comment-form" hidden>
+        <label>Anything to add? (optional)<input id="comment" type="text" maxlength="500" placeholder="Low clouds rolled in at the last minute…"></label>
+        <button class="primary-button" type="submit">Send note</button>
+        <small class="form-note" id="note"></small>
+      </form>
+    </section>
+  </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || '';
+    const date = params.get('date') || '';
+    const labels = { 1: 'Nothing', 2: 'A little colour', 3: 'Decent', 4: 'Really good', 5: 'On fire' };
+    const el = (id) => document.querySelector(id);
+    let current = Number(params.get('rating')) || 0;
+
+    async function submit(rating, comment = '') {
+      const response = await fetch('/api/outcome', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, date, rating, comment }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail?.[0]?.msg || body.detail || `Request failed (${response.status})`);
+      return body;
+    }
+
+    function renderButtons() {
+      const row = el('#rating-row'); row.innerHTML = ''; row.hidden = false;
+      for (let n = 1; n <= 5; n += 1) {
+        const b = document.createElement('button'); b.type = 'button';
+        b.className = `rating-button${n === current ? ' active' : ''}`; b.textContent = `${n} · ${labels[n]}`;
+        b.addEventListener('click', () => { current = n; save(); });
+        row.appendChild(b);
+      }
+    }
+
+    async function save(comment = '') {
+      try {
+        const r = await submit(current, comment);
+        el('#kicker').textContent = 'THANKS';
+        el('#title').textContent = `${labels[r.rating]}. Noted.`;
+        el('#text').textContent = `We predicted ${Math.round(r.predicted_score)}% near ${r.label || 'your spot'} on ${r.date}. Your rating helps calibrate future forecasts. Change it below if you tapped the wrong one.`;
+        renderButtons(); el('#comment-form').hidden = false;
+        if (comment) el('#note').textContent = 'Note saved.';
+      } catch (error) {
+        el('#kicker').textContent = 'SOMETHING WENT WRONG'; el('#title').textContent = "That link didn't work"; el('#text').textContent = error.message;
+      }
+    }
+
+    el('#comment-form').addEventListener('submit', (event) => { event.preventDefault(); save(el('#comment').value.trim()); });
+    if (!token || !date) { el('#kicker').textContent = 'SUNSET WATCH'; el('#title').textContent = 'This link is missing its key'; el('#text').textContent = 'Open the rating link from the email we sent after sunset.'; }
+    else if (current) save();
+    else { el('#title').textContent = 'How was the sunset?'; el('#text').textContent = 'Tap the closest description.'; renderButtons(); }
+  </script>
+</body>
+</html>

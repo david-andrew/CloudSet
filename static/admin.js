@@ -191,6 +191,37 @@ async function loadLog() {
   });
 }
 
+async function loadOutcomes() {
+  const result = await api('/api/admin/outcomes');
+  const s = result.summary;
+  document.querySelector('#outcome-summary').textContent = s.count
+    ? `· ${s.count} ratings · average ${s.average_rating.toFixed(1)}/5 · mean predicted ${Math.round(s.average_predicted_score)}`
+    : '· none yet';
+  const rows = document.querySelector('#outcome-rows');
+  rows.innerHTML = '';
+  if (!result.outcomes.length) { rows.innerHTML = '<tr><td colspan="7">No ratings yet. Requests go out about 40 minutes after sunset to anyone who was alerted that day.</td></tr>'; return; }
+  result.outcomes.forEach((o) => {
+    const tr = document.createElement('tr');
+    tr.appendChild(cell(new Date(o.created_at).toLocaleString()));
+    tr.appendChild(cell(o.email || `#${o.subscription_id}`));
+    tr.appendChild(cell(o.label || '—'));
+    tr.appendChild(cell(o.forecast_date));
+    tr.appendChild(cell(o.predicted_score == null ? '—' : String(Math.round(o.predicted_score))));
+    tr.appendChild(cell(`${o.rating} / 5`));
+    tr.appendChild(cell(o.comment || ''));
+    rows.appendChild(tr);
+  });
+}
+
+document.querySelector('#send-heartbeat').addEventListener('click', async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try {
+    const result = await api('/api/admin/heartbeat', { method: 'POST' });
+    const preview = document.querySelector('#email-preview'); preview.hidden = false; preview.textContent = result.body;
+    toast(result.delivery === 'sent' ? 'Heartbeat sent' : `Heartbeat ${result.delivery} (set CLOUDSET_ADMIN_EMAIL)`);
+  } catch (error) { toast(error.message); } finally { button.disabled = false; }
+});
+
 async function init() {
   try {
     const [region, status] = await Promise.all([api('/api/admin/region'), api('/api/admin/status')]);
@@ -199,8 +230,11 @@ async function init() {
     document.querySelector('#subscriber-stat').textContent = status.subscribers;
     const warnings = document.querySelector('#config-warnings');
     if (status.warnings && status.warnings.length) { warnings.hidden = false; warnings.textContent = `Configuration: ${status.warnings.join(' · ')}`; }
+    const problems = document.querySelector('#problems');
+    if (status.problems && status.problems.length) { problems.hidden = false; problems.textContent = `Needs attention: ${status.problems.join(' · ')}`; }
     loadSubscribers().catch((error) => toast(error.message));
     loadLog().catch((error) => toast(error.message));
+    loadOutcomes().catch((error) => toast(error.message));
     document.querySelector('#mode-stat').textContent = status.mode.toUpperCase();
     document.querySelector('#provider-stat').textContent = status.provider;
     document.querySelector('#hrrr-detail').textContent = status.mode === 'live'

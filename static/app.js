@@ -218,13 +218,39 @@ document.querySelector('#min-slider').addEventListener('input', (event) => {
 
 // --- forecast loading -----------------------------------------------------------
 
+let sunLine = null;
+function drawSunDirection(feature) {
+  if (sunLine) { map.removeLayer(sunLine); sunLine = null; }
+  if (!feature) return;
+  const { latitude, longitude } = state.location;
+  const azimuth = feature.properties.sun_azimuth * Math.PI / 180;
+  const km = 45;
+  const dLat = (km / 111) * Math.cos(azimuth);
+  const dLon = (km / (111 * Math.cos(latitude * Math.PI / 180))) * Math.sin(azimuth);
+  sunLine = L.polyline([[latitude, longitude], [latitude + dLat, longitude + dLon]], {
+    color: '#ffd166', weight: 3, opacity: 0.9, dashArray: '2 8', lineCap: 'round', interactive: false,
+  }).addTo(map);
+  sunLine.bindTooltip(`Sun sets this way · ${Math.round(feature.properties.sun_azimuth)}°`, {
+    permanent: true, direction: 'center', offset: [0, -10], className: 'sun-tooltip', interactive: false,
+  }).openTooltip([latitude + dLat, longitude + dLon]);
+}
+
+function syncUrl() {
+  const { latitude, longitude, label } = state.location;
+  const params = new URLSearchParams({ lat: latitude.toFixed(5), lon: longitude.toFixed(5), label });
+  if (state.day > 0) params.set('date', new Date(Date.now() + state.day * 86400000).toISOString().slice(0, 10));
+  window.history.replaceState(null, '', `/?${params}`);
+}
+
 async function loadPoint() {
   const params = new URLSearchParams({ latitude: state.location.latitude, longitude: state.location.longitude, day: state.day, offset: state.offset });
   const response = await fetch(`/api/forecast/point?${params}`);
-  if (response.status === 404) { updatePanel(null); return null; }
+  if (response.status === 404) { updatePanel(null); drawSunDirection(null); return null; }
   if (!response.ok) throw new Error(`Point forecast failed (${response.status})`);
   const result = await response.json();
   updatePanel(result.forecast);
+  drawSunDirection(result.forecast);
+  syncUrl();
   return result;
 }
 
@@ -358,6 +384,19 @@ searchForm.addEventListener('submit', async (event) => {
 });
 document.addEventListener('click', (event) => { if (!searchForm.contains(event.target)) hideResults(); });
 searchInput.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideResults(); });
+
+document.querySelector('#share-button').addEventListener('click', async () => {
+  syncUrl();
+  const url = window.location.href;
+  const title = `Cloudset · ${state.location.label} sunset outlook`;
+  try {
+    if (navigator.share && window.matchMedia('(max-width: 900px)').matches) { await navigator.share({ title, url }); return; }
+    await navigator.clipboard.writeText(url);
+    const button = document.querySelector('#share-button');
+    button.classList.add('done'); button.textContent = '✓';
+    setTimeout(() => { button.classList.remove('done'); button.textContent = '⇪'; }, 1500);
+  } catch { window.prompt('Copy this link', url); }
+});
 
 document.querySelector('#locate-button').addEventListener('click', () => {
   if (!navigator.geolocation) { document.querySelector('#summary').textContent = 'Your browser does not offer location access.'; return; }
